@@ -17,9 +17,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use tokio::sync::mpsc;
 
-use crate::model::{
-    Baseline, Build, BuildDetails, BuildEvent, BuildId, BuildProfile, CrateId,
-};
+use crate::model::{Baseline, Build, BuildDetails, BuildEvent, BuildId, BuildProfile, CrateId};
 
 /// Abstract repository for build data.
 ///
@@ -103,4 +101,138 @@ pub async fn run_persister(
     _rx: mpsc::Receiver<BuildEvent>,
 ) -> anyhow::Result<BuildId> {
     todo!("Consume BuildEvent stream and persist to repository")
+}
+
+#[cfg(test)]
+mod tests {
+    //! Contract tests for `run_persister`.
+
+    use super::*;
+    use crate::model::{CrateId, CrateKind};
+    use tempfile::TempDir;
+
+    async fn setup() -> (TempDir, Arc<dyn BuildRepository>) {
+        let dir = TempDir::new().unwrap();
+        let repo = SqliteRepository::open(&dir.path().join("test.db"))
+            .await
+            .unwrap();
+        (dir, Arc::new(repo))
+    }
+
+    fn build_started() -> BuildEvent {
+        BuildEvent::BuildStarted {
+            at: "2025-01-01T00:00:00Z".into(),
+            commit_hash: Some("abc123".into()),
+            cargo_args: vec!["build".into()],
+            profile: BuildProfile::Dev,
+        }
+    }
+
+    fn compilation_finished(name: &str, ms: u64) -> BuildEvent {
+        BuildEvent::CompilationFinished {
+            crate_id: CrateId {
+                name: name.into(),
+                version: None,
+            },
+            kind: CrateKind::Lib,
+            started_at: "2025-01-01T00:00:00Z".into(),
+            finished_at: "2025-01-01T00:00:01Z".into(),
+            duration: Duration::from_millis(ms),
+        }
+    }
+
+    fn build_finished(success: bool, total_ms: u64) -> BuildEvent {
+        BuildEvent::BuildFinished {
+            success,
+            total_duration: Duration::from_millis(total_ms),
+            at: "2025-01-01T00:00:01Z".into(),
+        }
+    }
+
+    #[tokio::test]
+    async fn persists_full_build_and_returns_build_id() {
+        let (_d, repo) = setup().await;
+        let (tx, rx) = mpsc::channel(16);
+
+        tx.send(build_started()).await.unwrap();
+        tx.send(compilation_finished("foo", 1000)).await.unwrap();
+        tx.send(compilation_finished("bar", 500)).await.unwrap();
+        tx.send(build_finished(true, 1500)).await.unwrap();
+        drop(tx);
+
+        let id = run_persister(repo.clone(), rx).await.unwrap();
+        let details = repo.fetch_build(id).await.unwrap().expect("build recorded");
+        assert_eq!(details.compilations.len(), 2);
+        assert_eq!(details.build.success, Some(true));
+        assert_eq!(
+            details.build.total_duration,
+            Some(Duration::from_millis(1500))
+        );
+    }
+
+    #[tokio::test]
+    async fn ignores_non_persisted_event_kinds() {
+        // CompilationStarted and CompilerMessage are informational — they should
+        // be consumed without error and without adding database rows.
+        let (_d, repo) = setup().await;
+        let (tx, rx) = mpsc::channel(16);
+
+        tx.send(build_started()).await.unwrap();
+        tx.send(BuildEvent::CompilationStarted {
+            crate_id: CrateId {
+                name: "foo".into(),
+                version: None,
+            },
+            kind: CrateKind::Lib,
+            at: "2025-01-01T00:00:00Z".into(),
+        })
+        .await
+        .unwrap();
+        tx.send(BuildEvent::CompilerMessage {
+            crate_id: CrateId {
+                name: "foo".into(),
+                version: None,
+            },
+            level: crate::model::MessageLevel::Warning,
+            text: "unused variable".into(),
+        })
+        .await
+        .unwrap();
+        tx.send(build_finished(true, 100)).await.unwrap();
+        drop(tx);
+
+        let id = run_persister(repo.clone(), rx).await.unwrap();
+        let details = repo.fetch_build(id).await.unwrap().unwrap();
+        assert!(details.compilations.is_empty());
+    }
+
+    #[tokio::test]
+    async fn errors_if_first_event_is_not_build_started() {
+        let (_d, repo) = setup().await;
+        let (tx, rx) = mpsc::channel(16);
+
+        tx.send(build_finished(true, 0)).await.unwrap();
+        drop(tx);
+
+        let result = run_persister(repo, rx).await;
+        assert!(
+            result.is_err(),
+            "expected error when first event is not BuildStarted, got {:?}",
+            result
+        );
+    }
+
+    #[tokio::test]
+    async fn records_failed_build() {
+        let (_d, repo) = setup().await;
+        let (tx, rx) = mpsc::channel(16);
+
+        tx.send(build_started()).await.unwrap();
+        tx.send(build_finished(false, 200)).await.unwrap();
+        drop(tx);
+
+        let id = run_persister(repo.clone(), rx).await.unwrap();
+        let details = repo.fetch_build(id).await.unwrap().unwrap();
+        assert_eq!(details.build.success, Some(false));
+    }
 }

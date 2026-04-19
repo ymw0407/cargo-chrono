@@ -121,3 +121,45 @@ pub enum MessageLevel {
     Error,
     Note,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn crate_kind_display_strings() {
+        assert_eq!(CrateKind::Lib.to_string(), "lib");
+        assert_eq!(CrateKind::Bin.to_string(), "bin");
+        assert_eq!(CrateKind::BuildScript.to_string(), "build-script");
+        assert_eq!(CrateKind::ProcMacro.to_string(), "proc-macro");
+        assert_eq!(CrateKind::Test.to_string(), "test");
+        assert_eq!(CrateKind::Example.to_string(), "example");
+        assert_eq!(CrateKind::Bench.to_string(), "bench");
+        assert_eq!(CrateKind::Unknown.to_string(), "unknown");
+    }
+
+    #[test]
+    fn build_profile_display_strings() {
+        assert_eq!(BuildProfile::Dev.to_string(), "dev");
+        assert_eq!(BuildProfile::Release.to_string(), "release");
+        assert_eq!(BuildProfile::Custom.to_string(), "custom");
+    }
+
+    #[test]
+    fn build_profile_equality() {
+        assert_eq!(BuildProfile::Dev, BuildProfile::Dev);
+        assert_ne!(BuildProfile::Dev, BuildProfile::Release);
+    }
+
+    #[test]
+    fn crate_kind_is_hashable() {
+        // Ensures CrateKind can be used as HashMap key (required by parser's
+        // start/finish matching).
+        use std::collections::HashSet;
+        let mut s = HashSet::new();
+        s.insert(CrateKind::Lib);
+        s.insert(CrateKind::Bin);
+        s.insert(CrateKind::Lib); // duplicate
+        assert_eq!(s.len(), 2);
+    }
+}

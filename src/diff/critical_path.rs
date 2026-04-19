@@ -42,3 +42,53 @@ pub fn compute_critical_path(_compilations: &[CrateCompilation]) -> Vec<String> 
          4) Backtrack to recover path"
     )
 }
+
+#[cfg(test)]
+mod tests {
+    //! Contract tests for `compute_critical_path`.
+
+    use super::*;
+    use crate::model::{BuildId, CrateId};
+    use std::time::Duration;
+
+    fn compilation(name: &str, ms: u64) -> CrateCompilation {
+        CrateCompilation {
+            build_id: BuildId(1),
+            crate_id: CrateId {
+                name: name.to_string(),
+                version: None,
+            },
+            kind: "lib".to_string(),
+            started_at: "2025-01-01T00:00:00Z".to_string(),
+            finished_at: "2025-01-01T00:00:01Z".to_string(),
+            duration: Duration::from_millis(ms),
+        }
+    }
+
+    #[test]
+    fn empty_input_returns_empty_path() {
+        assert!(compute_critical_path(&[]).is_empty());
+    }
+
+    #[test]
+    fn single_crate_is_its_own_critical_path() {
+        let path = compute_critical_path(&[compilation("solo", 100)]);
+        assert_eq!(path, vec!["solo".to_string()]);
+    }
+
+    #[test]
+    fn critical_path_includes_longest_crate() {
+        // Loose contract: the slowest crate must appear on the critical path.
+        let comps = vec![
+            compilation("fast", 10),
+            compilation("slow", 1000),
+            compilation("medium", 100),
+        ];
+        let path = compute_critical_path(&comps);
+        assert!(
+            path.iter().any(|n| n == "slow"),
+            "critical path should include the slowest crate; got {:?}",
+            path
+        );
+    }
+}

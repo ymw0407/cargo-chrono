@@ -7,9 +7,7 @@ use async_trait::async_trait;
 use rusqlite::Connection;
 use tokio::sync::Mutex;
 
-use crate::model::{
-    Baseline, Build, BuildDetails, BuildId, BuildProfile, CrateId,
-};
+use crate::model::{Baseline, Build, BuildDetails, BuildId, BuildProfile, CrateId};
 use crate::persist::BuildRepository;
 
 use super::migrations;
@@ -96,8 +94,29 @@ impl BuildRepository for SqliteRepository {
 
 #[cfg(test)]
 mod tests {
+    //! Contract tests for `SqliteRepository`.
+    //!
+    //! `test_open_creates_tables` passes as-is (the real impl is done).
+    //! The rest will panic at `todo!()` until the CRUD methods are implemented —
+    //! they serve as a spec for the Data team.
+
     use super::*;
     use tempfile::TempDir;
+
+    async fn fresh_repo() -> (TempDir, SqliteRepository) {
+        let dir = TempDir::new().unwrap();
+        let repo = SqliteRepository::open(&dir.path().join("test.db"))
+            .await
+            .unwrap();
+        (dir, repo)
+    }
+
+    fn lib_crate(name: &str) -> CrateId {
+        CrateId {
+            name: name.to_string(),
+            version: None,
+        }
+    }
 
     #[tokio::test]
     async fn test_open_creates_tables() {
@@ -120,5 +139,160 @@ mod tests {
             })
             .unwrap();
         assert_eq!(count, 0);
+    }
+
+    #[tokio::test]
+    async fn begin_build_returns_strictly_increasing_ids() {
+        let (_d, repo) = fresh_repo().await;
+        let id1 = repo
+            .begin_build("2025-01-01T00:00:00Z", None, "[]", &BuildProfile::Dev)
+            .await
+            .unwrap();
+        let id2 = repo
+            .begin_build("2025-01-01T00:01:00Z", None, "[]", &BuildProfile::Dev)
+            .await
+            .unwrap();
+        assert!(
+            id2.0 > id1.0,
+            "expected monotonic IDs, got {:?} then {:?}",
+            id1,
+            id2
+        );
+    }
+
+    #[tokio::test]
+    async fn record_and_finalize_roundtrip_via_fetch_build() {
+        let (_d, repo) = fresh_repo().await;
+        let id = repo
+            .begin_build(
+                "2025-01-01T00:00:00Z",
+                Some("deadbeef"),
+                r#"["build"]"#,
+                &BuildProfile::Dev,
+            )
+            .await
+            .unwrap();
+        let crate_id = CrateId {
+            name: "demo".into(),
+            version: Some("0.1.0".into()),
+        };
+        repo.record_compilation(
+            id,
+            &crate_id,
+            "lib",
+            "2025-01-01T00:00:00Z",
+            "2025-01-01T00:00:05Z",
+            Duration::from_millis(5000),
+        )
+        .await
+        .unwrap();
+        repo.finalize_build(
+            id,
+            "2025-01-01T00:00:05Z",
+            true,
+            Duration::from_millis(5000),
+        )
+        .await
+        .unwrap();
+
+        let details = repo.fetch_build(id).await.unwrap().expect("build exists");
+        assert_eq!(details.build.id, id);
+        assert_eq!(details.build.commit_hash.as_deref(), Some("deadbeef"));
+        assert_eq!(details.build.success, Some(true));
+        assert_eq!(
+            details.build.total_duration,
+            Some(Duration::from_millis(5000))
+        );
+        assert_eq!(details.compilations.len(), 1);
+        assert_eq!(details.compilations[0].crate_id.name, "demo");
+        assert_eq!(details.compilations[0].kind, "lib");
+        assert_eq!(
+            details.compilations[0].duration,
+            Duration::from_millis(5000)
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_build_missing_returns_none() {
+        let (_d, repo) = fresh_repo().await;
+        let result = repo.fetch_build(BuildId(9999)).await.unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn list_builds_returns_most_recent_first_respects_limit() {
+        let (_d, repo) = fresh_repo().await;
+        let timestamps = [
+            "2025-01-01T00:00:00Z",
+            "2025-01-02T00:00:00Z",
+            "2025-01-03T00:00:00Z",
+        ];
+        for ts in timestamps.iter() {
+            repo.begin_build(ts, None, "[]", &BuildProfile::Dev)
+                .await
+                .unwrap();
+        }
+
+        let builds = repo.list_builds(2).await.unwrap();
+        assert_eq!(builds.len(), 2);
+        assert_eq!(builds[0].started_at, "2025-01-03T00:00:00Z");
+        assert_eq!(builds[1].started_at, "2025-01-02T00:00:00Z");
+    }
+
+    #[tokio::test]
+    async fn list_builds_returns_empty_when_no_rows() {
+        let (_d, repo) = fresh_repo().await;
+        let builds = repo.list_builds(10).await.unwrap();
+        assert!(builds.is_empty());
+    }
+
+    #[tokio::test]
+    async fn fetch_baseline_none_when_no_data() {
+        let (_d, repo) = fresh_repo().await;
+        let result = repo.fetch_baseline("nonexistent").await.unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn fetch_baseline_computes_mean_min_max() {
+        let (_d, repo) = fresh_repo().await;
+        let id = repo
+            .begin_build("2025-01-01T00:00:00Z", None, "[]", &BuildProfile::Dev)
+            .await
+            .unwrap();
+        let crate_id = lib_crate("foo");
+
+        for ms in [100u64, 200, 300, 400, 500] {
+            repo.record_compilation(
+                id,
+                &crate_id,
+                "lib",
+                "2025-01-01T00:00:00Z",
+                "2025-01-01T00:00:01Z",
+                Duration::from_millis(ms),
+            )
+            .await
+            .unwrap();
+        }
+
+        let baseline = repo
+            .fetch_baseline("foo")
+            .await
+            .unwrap()
+            .expect("baseline should exist with 5 samples");
+
+        assert_eq!(baseline.sample_count, 5);
+        assert_eq!(baseline.mean, Duration::from_millis(300));
+        assert_eq!(baseline.min, Duration::from_millis(100));
+        assert_eq!(baseline.max, Duration::from_millis(500));
+
+        // std_dev for {100,200,300,400,500} is ~141ms (population) or ~158ms (sample).
+        // Accept either convention — just ensure it's in a sensible range.
+        let std_ms = baseline.std_dev.as_millis() as f64;
+        assert!(
+            (100.0..=200.0).contains(&std_ms),
+            "std_dev out of expected range: {}ms",
+            std_ms
+        );
     }
 }

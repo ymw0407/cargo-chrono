@@ -70,3 +70,121 @@ impl Default for EventBroker {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    //! Contract tests for `EventBroker::publish_loop`.
+    //!
+    //! These tests will panic at `todo!()` until `publish_loop` is implemented.
+
+    use super::*;
+    use crate::model::BuildEvent;
+    use std::time::Duration;
+    use tokio::sync::mpsc;
+    use tokio::time::timeout;
+    use tokio_util::sync::CancellationToken;
+
+    fn sample_build_finished() -> BuildEvent {
+        BuildEvent::BuildFinished {
+            success: true,
+            total_duration: Duration::from_secs(1),
+            at: "2025-04-19T12:00:00Z".to_string(),
+        }
+    }
+
+    #[tokio::test]
+    async fn every_subscriber_receives_every_event() {
+        let mut broker = EventBroker::new();
+        let mut rx1 = broker.subscribe(16);
+        let mut rx2 = broker.subscribe(16);
+
+        let (tx, rx) = mpsc::channel::<BuildEvent>(16);
+        let cancel = CancellationToken::new();
+        let handle = tokio::spawn(broker.publish_loop(rx, cancel.clone()));
+
+        tx.send(sample_build_finished()).await.unwrap();
+        drop(tx); // closes input → publish_loop should drain and exit
+
+        let ev1 = timeout(Duration::from_secs(1), rx1.recv())
+            .await
+            .expect("rx1 receive timed out");
+        let ev2 = timeout(Duration::from_secs(1), rx2.recv())
+            .await
+            .expect("rx2 receive timed out");
+        assert!(
+            matches!(ev1, Some(BuildEvent::BuildFinished { .. })),
+            "rx1 got {:?}",
+            ev1
+        );
+        assert!(
+            matches!(ev2, Some(BuildEvent::BuildFinished { .. })),
+            "rx2 got {:?}",
+            ev2
+        );
+
+        // publish_loop should return Ok(()) on clean shutdown.
+        let result = timeout(Duration::from_secs(1), handle)
+            .await
+            .expect("publish_loop did not exit");
+        result.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn cancel_token_stops_the_loop() {
+        let broker = EventBroker::new();
+        let (_tx, rx) = mpsc::channel::<BuildEvent>(16);
+        let cancel = CancellationToken::new();
+
+        let handle = tokio::spawn(broker.publish_loop(rx, cancel.clone()));
+        cancel.cancel();
+
+        let result = timeout(Duration::from_secs(1), handle)
+            .await
+            .expect("publish_loop did not exit after cancel");
+        result.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn closed_input_channel_exits_cleanly() {
+        let broker = EventBroker::new();
+        let (tx, rx) = mpsc::channel::<BuildEvent>(16);
+        let cancel = CancellationToken::new();
+        let handle = tokio::spawn(broker.publish_loop(rx, cancel));
+        drop(tx);
+        let result = timeout(Duration::from_secs(1), handle)
+            .await
+            .expect("publish_loop did not exit after input closed");
+        result.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn dead_subscriber_does_not_block_others() {
+        // If one subscriber drops its receiver, the other should still receive events.
+        let mut broker = EventBroker::new();
+        let dead_rx = broker.subscribe(16);
+        let mut live_rx = broker.subscribe(16);
+        drop(dead_rx); // subscriber 1 is dead before any publishing happens
+
+        let (tx, rx) = mpsc::channel::<BuildEvent>(16);
+        let cancel = CancellationToken::new();
+        let handle = tokio::spawn(broker.publish_loop(rx, cancel));
+
+        tx.send(sample_build_finished()).await.unwrap();
+        drop(tx);
+
+        let received = timeout(Duration::from_secs(1), live_rx.recv())
+            .await
+            .expect("live subscriber timed out");
+        assert!(matches!(received, Some(BuildEvent::BuildFinished { .. })));
+
+        let _ = timeout(Duration::from_secs(1), handle).await;
+    }
+
+    #[tokio::test]
+    async fn subscribe_without_publish_does_not_panic() {
+        // Smoke test: creating subscribers before `publish_loop` runs must not panic.
+        let mut broker = EventBroker::new();
+        let _rx1 = broker.subscribe(16);
+        let _rx2 = broker.subscribe(16);
+    }
+}
