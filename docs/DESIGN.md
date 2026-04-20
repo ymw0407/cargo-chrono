@@ -256,6 +256,26 @@ GROUP BY crate_name;
 | Critical path 계산 복잡도 | 대형 프로젝트에서 느림 | MVP는 단순 구현, 필요 시 최적화 |
 | 팀원 간 인터페이스 불일치 | 통합 지연 | model/ 타입을 Day 1에 확정, PR 리뷰 필수 |
 
+### 10.1 Race Condition 분석
+
+5개 async task가 동시에 돌기 때문에 아래와 같은 race condition이 예상된다.
+구현 전에 **[docs/CONCURRENCY.md](CONCURRENCY.md)** 를 읽고, PR 머지 전에 해당 문서의
+"구현 체크리스트"로 검증한다.
+
+주요 race condition 요약:
+
+| ID | 심각도 | 내용 | 책임 |
+|----|--------|------|------|
+| R1 | HIGH | Supervisor → Parser 백프레셔 데드락 (cargo 프로세스가 stdout write에서 블록) | Integrator |
+| R4 | HIGH | Watch 모드에서 슬로우 TUI 구독자가 Persister까지 지연시킴 | Realtime |
+| R6 | HIGH | BuildFinished 이후 Parser 내부 pending compilation 처리 | Integrator |
+| R7 | MID  | mpsc input close 감지 타이밍으로 인한 finalize_build 누락 | Integrator, Data |
+| R9 | HIGH | 트랜잭션 경계 부재로 인한 orphan build row | Data |
+| R11 | HIGH | TUI raw mode 복원 실패로 사용자 터미널 망가짐 | Realtime |
+| R12 | MID  | Shutdown 시 TUI 종료와 stdout 메시지 인터리브 | Integrator, Realtime |
+
+전체 12개 race condition과 대응 전략은 `docs/CONCURRENCY.md` 참조.
+
 ## 11. 발표 전략
 
 ### 데모 시나리오
