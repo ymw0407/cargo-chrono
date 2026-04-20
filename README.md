@@ -104,6 +104,121 @@ main.rs : 전체 조립 (DI 컨테이너 역할)
 4. **충돌 방지**: 각 역할의 소유 모듈만 수정. `model/`은 Integrator가 소유하되 변경 시 팀 합의.
 5. **CI**: 모든 PR은 `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test` 통과 필수
 
+## 데모 시뮬레이션 (예상 동작)
+
+> 아래는 구현이 완료된 뒤 기대되는 사용자 경험입니다. 실제 출력 포맷은
+> `src/cli/mod.rs`의 `render_ls` / `render_diff` 구현에서 확정되어 있으며,
+> TUI 레이아웃은 `AGENTS.md`의 Realtime 섹션에 명시되어 있습니다.
+
+### 1) `cargo-chrono record` — 빌드 기록
+
+```console
+$ cargo-chrono record -- --release
+   Compiling proc-macro2 v1.0.86
+   Compiling unicode-ident v1.0.13
+   Compiling serde v1.0.210
+   Compiling syn v2.0.77
+   Compiling serde_json v1.0.132
+   Compiling tokio v1.43.0
+   Compiling my-app v0.1.0 (/Users/alice/projects/my-app)
+    Finished `release` profile [optimized] target(s) in 42.7s
+Build #12 recorded.
+```
+
+DB 파일 (`.cargo-chrono/history.db`)에 빌드 메타데이터와 crate별 컴파일 시간이 저장됩니다.
+
+### 2) `cargo-chrono ls` — 최근 빌드 목록
+
+```console
+$ cargo-chrono ls --last 5
+ID     Started              Profile  Duration   Status
+------------------------------------------------------------
+#12    2025-04-18T15:32:11  release  42.7s      ok
+#11    2025-04-18T14:05:48  release  41.9s      ok
+#10    2025-04-18T11:20:03  dev      8.2s       ok
+#9     2025-04-17T18:44:29  release  35.6s      FAIL
+#8     2025-04-17T17:12:15  release  35.1s      ok
+```
+
+빌드 기록이 없으면 `No builds recorded yet.`이 출력됩니다.
+
+### 3) `cargo-chrono diff` — 두 빌드 비교
+
+```console
+$ cargo-chrono diff 11 12
+Build #11 → Build #12
+  Total: 41.9s → 42.7s (+0.8s, +1.9%)
+
+  + serde_json v1.0.132 (new) 1.3s
+  ~ my-app v0.1.0 12.4s → 14.0s (+1.6s, +12.9%)
+  ~ tokio v1.43.0 3.8s → 4.1s (+0.3s, +7.9%)
+  - old-dependency v0.3.2 (removed) 1.2s
+  = serde v1.0.210 2.1s
+  = syn v2.0.77 5.8s
+
+Critical path (before): proc-macro2 → syn → serde → my-app
+Critical path (after):  proc-macro2 → syn → serde → serde_json → my-app
+```
+
+기호 의미:
+- `+` 새로 추가된 crate (after에만 존재)
+- `-` 제거된 crate (before에만 존재)
+- `~` 유의미하게 느려지거나 빨라진 crate (± 1% 초과)
+- `=` 사실상 동일한 crate
+
+crate 변경 목록은 `abs_delta_ms` 내림차순으로 정렬돼, 가장 큰 영향이 위에 옵니다.
+
+### 4) `cargo-chrono watch` — 실시간 TUI 대시보드
+
+`watch`는 빌드가 진행되는 동안 터미널을 장악하고, Record처럼 DB에도 동시 저장합니다.
+`q` 또는 `Ctrl-C`로 종료합니다.
+
+```
+┌─ cargo-chrono ─────────────────────────────────────────────────────────┐
+│ Build #13 (release)  •  commit 4899d16  •  elapsed 00:28               │
+│ [████████████████████████░░░░░░░░░░░░░░░░░░░] 142/237 crates  ETA 19s │
+├─ Active compilations ──────────────────────────────────────────────────┤
+│  ▶ serde_derive v1.0.210       12.4s   ⚠ slower (baseline 7.1s ±0.8)   │
+│  ▶ tokio v1.43.0                3.2s   · normal (baseline 3.8s ±0.4)   │
+│  ▶ clap_derive v4.5.20          0.9s   · normal                        │
+│  ▶ my-app (build-script)        0.3s   ? unknown  (no baseline)        │
+├─ Recently finished (last 5) ───────────────────────────────────────────┤
+│  ✓ syn v2.0.77                  5.82s  normal                          │
+│  ✓ proc-macro2 v1.0.86          2.14s  normal                          │
+│  ✓ unicode-ident v1.0.13        0.41s  ↓ faster (baseline 0.6s)        │
+│  ✓ quote v1.0.37                0.98s  normal                          │
+│  ✓ serde v1.0.210               2.09s  normal                          │
+├─ System ───────────────────────────────────────────────────────────────┤
+│  CPU:  ██████████████████░░  87%    Memory:  4.8 GiB / 16 GiB          │
+└─────────────────────────────────────────[q] quit  [Ctrl-C] interrupt ──┘
+```
+
+이상 감지 아이콘:
+- `⚠ slower` — 평균 + 2σ 초과 (`anomaly::classify`)
+- `↓ faster` — 평균 − 2σ 미만
+- `· normal` — 정상 범위
+- `? unknown` — baseline이 없는 신규 crate
+
+빌드가 끝나면 TUI가 닫히고 (터미널 raw mode 복원), 콘솔에 `Build #13 recorded.`가 출력됩니다.
+
+### 데모 플로우 (발표용 시나리오)
+
+```bash
+# 1. 한 번 빌드해서 baseline을 만든다
+cargo-chrono record -- --release
+
+# 2. 의존성을 일부러 추가/제거한 뒤 다시 빌드
+cargo add serde_json
+cargo-chrono record -- --release
+
+# 3. 두 빌드를 비교
+cargo-chrono ls --last 2
+cargo-chrono diff 11 12
+```
+
+TUI 스트레스 테스트: 느린 의존성(`syn`, `serde_derive`)이 들어간 프로젝트에서
+`cargo clean && cargo-chrono watch -- --release`로 스타트업 빌드의 병목 구간을 실시간 관찰합니다.
+
 ## 빌드 & 실행
 
 ```bash
