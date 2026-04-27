@@ -57,11 +57,32 @@ impl EventBroker {
     /// Returns `Ok(())` on clean shutdown. Returns an error only if
     /// an unexpected internal failure occurs.
     pub async fn publish_loop(
-        self,
-        _rx: mpsc::Receiver<BuildEvent>,
-        _cancel: CancellationToken,
+        mut self,
+        mut rx: mpsc::Receiver<BuildEvent>,
+        cancel: CancellationToken,
     ) -> anyhow::Result<()> {
-        todo!("Read from rx, clone event to each subscriber, remove dead subscribers")
+        loop {
+            tokio::select! {
+                biased;
+                _ = cancel.cancelled() => return Ok(()),
+                maybe_event = rx.recv() => {
+                    let event = match maybe_event {
+                        Some(e) => e,
+                        None => return Ok(()),
+                    };
+                    // Fan-out: try_send avoids blocking on slow/full subscribers (R4).
+                    // Full  → drop this event for that subscriber only.
+                    // Closed → permanently remove the subscriber.
+                    self.subscribers.retain(|tx| {
+                        match tx.try_send(event.clone()) {
+                            Ok(()) => true,
+                            Err(mpsc::error::TrySendError::Full(_)) => true,
+                            Err(mpsc::error::TrySendError::Closed(_)) => false,
+                        }
+                    });
+                }
+            }
+        }
     }
 }
 
