@@ -18,9 +18,14 @@
 //! - Uses `serde_json` for direct parsing (no `cargo_metadata` crate).
 //! - Maintains an internal `HashMap<CrateId, Instant>` to match start/finish pairs.
 
+use std::collections::HashMap;
+use std::time::Instant;
+
+use chrono::Utc;
+use serde_json::Value;
 use tokio::sync::mpsc;
 
-use crate::model::{BuildEvent, BuildProfile};
+use crate::model::{BuildEvent, BuildProfile, CrateId, CrateKind, MessageLevel};
 
 /// Configuration for the parser.
 pub struct ParserConfig {
@@ -49,10 +54,216 @@ pub struct ParserConfig {
 /// Returns an error if the parser encounters a fatal condition
 /// (e.g., the input channel closes before any events are received).
 pub async fn run_parser(
-    _rx: mpsc::Receiver<String>,
-    _config: ParserConfig,
+    mut rx: mpsc::Receiver<String>,
+    config: ParserConfig,
 ) -> anyhow::Result<mpsc::Receiver<BuildEvent>> {
-    todo!("Parse JSON lines into BuildEvent stream")
+    let (tx, event_rx) = mpsc::channel::<BuildEvent>(1024);
+
+    tokio::spawn(async move {
+        let build_start = Instant::now();
+        let started_at_iso = iso_now();
+
+        // (1) Emit BuildStarted as the very first event.
+        let _ = tx
+            .send(BuildEvent::BuildStarted {
+                at: started_at_iso,
+                commit_hash: config.commit_hash,
+                cargo_args: config.cargo_args,
+                profile: config.profile,
+            })
+            .await;
+
+        // Track in-progress compilations so we can compute durations.
+        // Value: (start Instant, start ISO string).
+        let mut in_progress: HashMap<CrateId, (Instant, String)> = HashMap::new();
+
+        // build-finished state — defaults to "didn't see one" = treat as failure.
+        let mut build_success = false;
+
+        // (2) Process each incoming JSON line.
+        while let Some(line) = rx.recv().await {
+            // Malformed JSON: skip silently (forward compatibility).
+            let json: Value = match serde_json::from_str(&line) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+
+            let reason = match json.get("reason").and_then(|r| r.as_str()) {
+                Some(r) => r,
+                None => continue,
+            };
+
+            match reason {
+                "compiler-artifact" => {
+                    let (crate_id, kind) = match parse_target(&json) {
+                        Some(p) => p,
+                        None => continue,
+                    };
+
+                    let now = Instant::now();
+                    let now_iso = iso_now();
+
+                    // Get start time. If we never saw this crate before, "started" = now.
+                    let (started_instant, started_iso) = in_progress
+                        .remove(&crate_id)
+                        .unwrap_or_else(|| (now, now_iso.clone()));
+
+                    let duration = now.saturating_duration_since(started_instant);
+
+                    // Emit synthetic CompilationStarted, then CompilationFinished.
+                    let _ = tx
+                        .send(BuildEvent::CompilationStarted {
+                            crate_id: crate_id.clone(),
+                            kind: kind.clone(),
+                            at: started_iso.clone(),
+                        })
+                        .await;
+
+                    let _ = tx
+                        .send(BuildEvent::CompilationFinished {
+                            crate_id,
+                            kind,
+                            started_at: started_iso,
+                            finished_at: now_iso,
+                            duration,
+                        })
+                        .await;
+                }
+
+                "compiler-message" => {
+                    let crate_id = match parse_crate_id(&json) {
+                        Some(c) => c,
+                        None => continue,
+                    };
+                    let message = match json.get("message") {
+                        Some(m) => m,
+                        None => continue,
+                    };
+                    let level = match message.get("level").and_then(|l| l.as_str()) {
+                        Some("error") => MessageLevel::Error,
+                        Some("warning") => MessageLevel::Warning,
+                        _ => MessageLevel::Note,
+                    };
+                    let text = message
+                        .get("rendered")
+                        .and_then(|r| r.as_str())
+                        .unwrap_or("")
+                        .to_string();
+
+                    let _ = tx
+                        .send(BuildEvent::CompilerMessage {
+                            crate_id,
+                            level,
+                            text,
+                        })
+                        .await;
+                }
+
+                "build-finished" => {
+                    build_success = json
+                        .get("success")
+                        .and_then(|s| s.as_bool())
+                        .unwrap_or(false);
+                    break;
+                }
+
+                // Unknown reason → silently ignore (forward compatibility).
+                _ => {}
+            }
+        }
+
+        // (3) Emit BuildFinished as the very last event.
+        let _ = tx
+            .send(BuildEvent::BuildFinished {
+                success: build_success,
+                total_duration: build_start.elapsed(),
+                at: iso_now(),
+            })
+            .await;
+    });
+
+    Ok(event_rx)
+}
+
+// ---- helpers --------------------------------------------------------------
+
+/// Current UTC timestamp formatted as RFC 3339 (an ISO 8601 subset).
+fn iso_now() -> String {
+    Utc::now().to_rfc3339()
+}
+
+/// Extract `(CrateId, CrateKind)` from a cargo `compiler-artifact` JSON object.
+fn parse_target(json: &Value) -> Option<(CrateId, CrateKind)> {
+    let crate_id = parse_crate_id(json)?;
+    let kind = parse_crate_kind(json);
+    Some((crate_id, kind))
+}
+
+/// Extract a `CrateId` from `target.name` and `package_id`.
+fn parse_crate_id(json: &Value) -> Option<CrateId> {
+    let name = json.get("target")?.get("name")?.as_str()?.to_string();
+    let package_id = json
+        .get("package_id")
+        .and_then(|p| p.as_str())
+        .unwrap_or("");
+    let version = extract_version(package_id);
+    Some(CrateId { name, version })
+}
+
+/// Map cargo's `target.kind[0]` string to our `CrateKind` enum.
+fn parse_crate_kind(json: &Value) -> CrateKind {
+    let kind_str = json
+        .get("target")
+        .and_then(|t| t.get("kind"))
+        .and_then(|k| k.get(0))
+        .and_then(|k| k.as_str())
+        .unwrap_or("");
+    match kind_str {
+        "lib" => CrateKind::Lib,
+        "bin" => CrateKind::Bin,
+        "custom-build" => CrateKind::BuildScript,
+        "proc-macro" => CrateKind::ProcMacro,
+        "test" => CrateKind::Test,
+        "example" => CrateKind::Example,
+        "bench" => CrateKind::Bench,
+        _ => CrateKind::Unknown,
+    }
+}
+
+/// Extract the version from a cargo `package_id` string.
+///
+/// Handles three formats:
+/// - New: `"registry+https://...#name@1.0.15"` → `"1.0.15"`
+/// - New (path, no @): `"path+file:///tmp/foo#0.1.0"` → `"0.1.0"`
+/// - Old: `"name 0.1.0 (source)"` → `"0.1.0"`
+fn extract_version(package_id: &str) -> Option<String> {
+    if package_id.is_empty() {
+        return None;
+    }
+
+    // Format 1: "...#name@version"
+    if let Some(at_pos) = package_id.rfind('@') {
+        let v = package_id[at_pos + 1..].trim();
+        if !v.is_empty() {
+            return Some(v.to_string());
+        }
+    }
+
+    // Format 2: "path+file:///path#version" (no @ after #)
+    if let Some(hash_pos) = package_id.rfind('#') {
+        let after = package_id[hash_pos + 1..].trim();
+        if !after.is_empty() && !after.contains('@') {
+            return Some(after.to_string());
+        }
+    }
+
+    // Format 3: "name version (source)"
+    let parts: Vec<&str> = package_id.split_whitespace().collect();
+    if parts.len() >= 2 {
+        return Some(parts[1].to_string());
+    }
+
+    None
 }
 
 #[cfg(test)]
@@ -219,5 +430,86 @@ mod tests {
             Some(BuildEvent::BuildFinished { success, .. }) => assert!(!success),
             other => panic!("expected BuildFinished, got {:?}", other),
         }
+    }
+
+    // ---- helper unit tests ------------------------------------------------
+
+    #[test]
+    fn extract_version_old_format() {
+        assert_eq!(
+            extract_version("demo 0.1.0 (path+file:///tmp/demo)"),
+            Some("0.1.0".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_version_new_format_with_at() {
+        assert_eq!(
+            extract_version("registry+https://github.com/rust-lang/crates.io-index#itoa@1.0.15"),
+            Some("1.0.15".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_version_path_format_no_at() {
+        assert_eq!(
+            extract_version("path+file:///tmp/ripgrep#15.1.0"),
+            Some("15.1.0".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_version_workspace_member_with_at() {
+        assert_eq!(
+            extract_version("path+file:///tmp/ripgrep/crates/cli#grep-cli@0.1.12"),
+            Some("0.1.12".to_string())
+        );
+    }
+
+    /// End-to-end smoke test using the real cargo output fixture
+    /// (`tests/fixtures/sample_output.jsonl`).
+    ///
+    /// Verifies that the parser handles real cargo JSON output without crashing
+    /// and produces a sensible event sequence:
+    ///   - Starts with BuildStarted
+    ///   - Ends with BuildFinished
+    ///   - Emits at least one CompilationStarted/Finished pair
+    #[tokio::test]
+    async fn fixture_sample_output_parses_cleanly() {
+        let fixture = std::fs::read_to_string("tests/fixtures/sample_output.jsonl")
+            .expect("fixture file should exist at tests/fixtures/sample_output.jsonl");
+
+        let lines: Vec<&str> = fixture.lines().collect();
+        let events = collect_events(lines).await;
+
+        // First and last contracts.
+        assert!(matches!(
+            events.first(),
+            Some(BuildEvent::BuildStarted { .. })
+        ));
+        assert!(matches!(
+            events.last(),
+            Some(BuildEvent::BuildFinished { .. })
+        ));
+
+        // Should have produced compilation events for real crates.
+        let compilation_count = events
+            .iter()
+            .filter(|e| matches!(e, BuildEvent::CompilationFinished { .. }))
+            .count();
+        assert!(
+            compilation_count > 0,
+            "expected at least one CompilationFinished from the fixture, got 0"
+        );
+
+        // Each Started should pair with a Finished (we always emit both together).
+        let started_count = events
+            .iter()
+            .filter(|e| matches!(e, BuildEvent::CompilationStarted { .. }))
+            .count();
+        assert_eq!(
+            started_count, compilation_count,
+            "every CompilationFinished should have a matching CompilationStarted"
+        );
     }
 }
