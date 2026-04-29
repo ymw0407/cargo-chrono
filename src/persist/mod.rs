@@ -97,10 +97,76 @@ pub trait BuildRepository: Send + Sync {
 /// Returns an error if any database operation fails or if the stream
 /// does not start with `BuildStarted`.
 pub async fn run_persister(
-    _repo: Arc<dyn BuildRepository>,
-    _rx: mpsc::Receiver<BuildEvent>,
+    repo: Arc<dyn BuildRepository>,
+    mut rx: mpsc::Receiver<BuildEvent>,
 ) -> anyhow::Result<BuildId> {
-    todo!("Consume BuildEvent stream and persist to repository")
+    // The first event must be BuildStarted; everything else flows from the
+    // BuildId issued here.
+    let first = rx
+        .recv()
+        .await
+        .ok_or_else(|| anyhow::anyhow!("event stream closed before BuildStarted"))?;
+
+    let build_id = match first {
+        BuildEvent::BuildStarted {
+            at,
+            commit_hash,
+            cargo_args,
+            profile,
+        } => {
+            // SQLite has no array column type, so cargo_args is stored as a JSON string.
+            let cargo_args_json = serde_json::to_string(&cargo_args)?;
+            repo.begin_build(&at, commit_hash.as_deref(), &cargo_args_json, &profile)
+                .await?
+        }
+        other => {
+            return Err(anyhow::anyhow!(
+                "expected BuildStarted as first event, got {:?}",
+                other
+            ));
+        }
+    };
+
+    // Drain the rest of the stream. CompilationStarted and CompilerMessage are
+    // informational (TUI/diagnostics) and intentionally not persisted.
+    while let Some(event) = rx.recv().await {
+        match event {
+            BuildEvent::CompilationFinished {
+                crate_id,
+                kind,
+                started_at,
+                finished_at,
+                duration,
+            } => {
+                repo.record_compilation(
+                    build_id,
+                    &crate_id,
+                    &kind.to_string(),
+                    &started_at,
+                    &finished_at,
+                    duration,
+                )
+                .await?;
+            }
+            BuildEvent::BuildFinished {
+                success,
+                total_duration,
+                at,
+            } => {
+                repo.finalize_build(build_id, &at, success, total_duration)
+                    .await?;
+                return Ok(build_id);
+            }
+            // CompilationStarted, CompilerMessage, and any future variants:
+            // not persisted.
+            _ => {}
+        }
+    }
+
+    // Stream closed without a BuildFinished event (cancelled or crashed).
+    // Leave the row in its partially-written state — `success` and
+    // `total_duration` remain NULL so `Build::success` reads as `None`.
+    Ok(build_id)
 }
 
 #[cfg(test)]
