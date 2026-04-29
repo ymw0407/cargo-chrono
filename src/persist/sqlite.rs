@@ -7,7 +7,9 @@ use async_trait::async_trait;
 use rusqlite::Connection;
 use tokio::sync::Mutex;
 
-use crate::model::{Baseline, Build, BuildDetails, BuildId, BuildProfile, CrateId};
+use crate::model::{
+    Baseline, Build, BuildDetails, BuildId, BuildProfile, CrateCompilation, CrateId,
+};
 use crate::persist::BuildRepository;
 
 use super::migrations;
@@ -49,47 +51,202 @@ impl SqliteRepository {
 impl BuildRepository for SqliteRepository {
     async fn begin_build(
         &self,
-        _started_at: &str,
-        _commit_hash: Option<&str>,
-        _cargo_args: &str,
-        _profile: &BuildProfile,
+        started_at: &str,
+        commit_hash: Option<&str>,
+        cargo_args: &str,
+        profile: &BuildProfile,
     ) -> anyhow::Result<BuildId> {
-        todo!("INSERT into builds and return BuildId")
+        let conn = self.conn.lock().await;
+
+        conn.execute(
+            "INSERT INTO builds (started_at, commit_hash, cargo_args, profile) \
+             VALUES (?1, ?2, ?3, ?4)",
+            (started_at, commit_hash, cargo_args, profile.to_string()),
+        )?;
+
+        Ok(BuildId(conn.last_insert_rowid()))
     }
 
     async fn record_compilation(
         &self,
-        _build_id: BuildId,
-        _crate_id: &CrateId,
-        _kind: &str,
-        _started_at: &str,
-        _finished_at: &str,
-        _duration: Duration,
+        build_id: BuildId,
+        crate_id: &CrateId,
+        kind: &str,
+        started_at: &str,
+        finished_at: &str,
+        duration: Duration,
     ) -> anyhow::Result<()> {
-        todo!("INSERT into crate_compilations")
+        let conn = self.conn.lock().await;
+        let duration_ms = duration.as_millis() as i64;
+
+        conn.execute(
+            "INSERT INTO crate_compilations \
+             (build_id, crate_name, crate_version, kind, started_at, finished_at, duration_ms) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            (
+                build_id.0,
+                &crate_id.name,
+                &crate_id.version,
+                kind,
+                started_at,
+                finished_at,
+                duration_ms,
+            ),
+        )?;
+
+        Ok(())
     }
 
     async fn finalize_build(
         &self,
-        _build_id: BuildId,
-        _finished_at: &str,
-        _success: bool,
-        _total_duration: Duration,
+        build_id: BuildId,
+        finished_at: &str,
+        success: bool,
+        total_duration: Duration,
     ) -> anyhow::Result<()> {
-        todo!("UPDATE builds SET finished_at, success, total_duration_ms")
+        let conn = self.conn.lock().await;
+        let duration_ms = total_duration.as_millis() as i64;
+
+        conn.execute(
+            "UPDATE builds SET finished_at = ?1, success = ?2, total_duration_ms = ?3 \
+             WHERE id = ?4",
+            (finished_at, success as i32, duration_ms, build_id.0),
+        )?;
+
+        Ok(())
     }
 
-    async fn list_builds(&self, _limit: usize) -> anyhow::Result<Vec<Build>> {
-        todo!("SELECT from builds ORDER BY started_at DESC LIMIT ?")
+    async fn list_builds(&self, limit: usize) -> anyhow::Result<Vec<Build>> {
+        let conn = self.conn.lock().await;
+
+        let mut stmt = conn.prepare(
+            "SELECT id, started_at, commit_hash, cargo_args, profile, \
+                    finished_at, success, total_duration_ms \
+             FROM builds ORDER BY started_at DESC LIMIT ?1",
+        )?;
+
+        let rows = stmt.query_map([limit as i64], row_to_build)?;
+
+        let mut builds = Vec::new();
+        for build in rows {
+            builds.push(build?);
+        }
+        Ok(builds)
     }
 
-    async fn fetch_build(&self, _id: BuildId) -> anyhow::Result<Option<BuildDetails>> {
-        todo!("SELECT build + JOIN crate_compilations")
+    async fn fetch_build(&self, id: BuildId) -> anyhow::Result<Option<BuildDetails>> {
+        let conn = self.conn.lock().await;
+
+        let mut stmt = conn.prepare(
+            "SELECT id, started_at, commit_hash, cargo_args, profile, \
+                    finished_at, success, total_duration_ms \
+             FROM builds WHERE id = ?1",
+        )?;
+
+        let build = match stmt.query_row([id.0], row_to_build) {
+            Ok(b) => b,
+            Err(rusqlite::Error::QueryReturnedNoRows) => return Ok(None),
+            Err(e) => return Err(e.into()),
+        };
+
+        let mut comp_stmt = conn.prepare(
+            "SELECT crate_name, crate_version, kind, started_at, finished_at, duration_ms \
+             FROM crate_compilations WHERE build_id = ?1",
+        )?;
+
+        let comp_rows = comp_stmt.query_map([id.0], |row| {
+            let name: String = row.get(0)?;
+            let version: Option<String> = row.get(1)?;
+            let kind: String = row.get(2)?;
+            let started_at: String = row.get(3)?;
+            let finished_at: String = row.get(4)?;
+            let duration_ms: i64 = row.get(5)?;
+
+            Ok(CrateCompilation {
+                build_id: id,
+                crate_id: CrateId { name, version },
+                kind,
+                started_at,
+                finished_at,
+                duration: Duration::from_millis(duration_ms as u64),
+            })
+        })?;
+
+        let mut compilations = Vec::new();
+        for c in comp_rows {
+            compilations.push(c?);
+        }
+
+        Ok(Some(BuildDetails {
+            build,
+            compilations,
+        }))
     }
 
-    async fn fetch_baseline(&self, _crate_name: &str) -> anyhow::Result<Option<Baseline>> {
-        todo!("Compute mean, std_dev, min, max from historical crate_compilations")
+    async fn fetch_baseline(&self, crate_name: &str) -> anyhow::Result<Option<Baseline>> {
+        let conn = self.conn.lock().await;
+
+        let mut stmt = conn.prepare(
+            "SELECT COUNT(*), \
+                    AVG(duration_ms), \
+                    MIN(duration_ms), \
+                    MAX(duration_ms), \
+                    AVG(duration_ms * duration_ms) \
+             FROM crate_compilations WHERE crate_name = ?1",
+        )?;
+
+        let baseline = stmt.query_row([crate_name], |row| {
+            let count: i64 = row.get(0)?;
+            if count == 0 {
+                return Ok(None);
+            }
+
+            let mean_ms: f64 = row.get(1)?;
+            let min_ms: i64 = row.get(2)?;
+            let max_ms: i64 = row.get(3)?;
+            let mean_square_ms: f64 = row.get(4)?;
+
+            // Population std dev: sqrt(E[X^2] - (E[X])^2). Clamp negatives from float drift.
+            let variance = (mean_square_ms - mean_ms * mean_ms).max(0.0);
+            let std_dev_ms = variance.sqrt();
+
+            Ok(Some(Baseline {
+                crate_id: CrateId {
+                    name: crate_name.to_string(),
+                    version: None,
+                },
+                sample_count: count as u32,
+                mean: Duration::from_millis(mean_ms as u64),
+                std_dev: Duration::from_millis(std_dev_ms as u64),
+                min: Duration::from_millis(min_ms as u64),
+                max: Duration::from_millis(max_ms as u64),
+            }))
+        })?;
+
+        Ok(baseline)
     }
+}
+
+fn row_to_build(row: &rusqlite::Row) -> rusqlite::Result<Build> {
+    let id = BuildId(row.get(0)?);
+    let started_at: String = row.get(1)?;
+    let commit_hash: Option<String> = row.get(2)?;
+    let cargo_args: String = row.get(3)?;
+    let profile: String = row.get(4)?;
+    let finished_at: Option<String> = row.get(5)?;
+    let success_int: Option<i32> = row.get(6)?;
+    let duration_ms: Option<i64> = row.get(7)?;
+
+    Ok(Build {
+        id,
+        started_at,
+        finished_at,
+        commit_hash,
+        cargo_args,
+        profile,
+        success: success_int.map(|s| s != 0),
+        total_duration: duration_ms.map(|d| Duration::from_millis(d as u64)),
+    })
 }
 
 #[cfg(test)]
