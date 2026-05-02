@@ -92,7 +92,10 @@ fn render_header(frame: &mut Frame, area: Rect, state: &TuiState) {
             .total_duration
             .map(format_duration)
             .unwrap_or_default();
-        format!("{}  in {}  ({} crates)", symbol, total, state.finished_count)
+        format!(
+            "{}  in {}  ({} crates)",
+            symbol, total, state.finished_count
+        )
     } else {
         format!("{} crates compiled", state.finished_count)
     };
@@ -122,11 +125,7 @@ fn render_active(frame: &mut Frame, area: Rect, state: &TuiState) {
         )));
     } else {
         // Collect and sort by elapsed descending so the slowest sits at top.
-        let mut entries: Vec<_> = state
-            .active
-            .values()
-            .map(|c| (c, c.elapsed()))
-            .collect();
+        let mut entries: Vec<_> = state.active.values().map(|c| (c, c.elapsed())).collect();
         entries.sort_by(|a, b| b.1.cmp(&a.1));
 
         for (comp, elapsed) in entries {

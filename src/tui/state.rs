@@ -194,7 +194,12 @@ impl TuiState {
     /// * `crate_id` — Crate returned earlier by [`apply_event`](Self::apply_event).
     /// * `verdict`  — Result of [`anomaly::classify`](crate::anomaly::classify).
     pub fn set_verdict(&mut self, crate_id: &CrateId, verdict: AnomalyVerdict) {
-        if let Some(entry) = self.recent.iter_mut().rev().find(|c| &c.crate_id == crate_id) {
+        if let Some(entry) = self
+            .recent
+            .iter_mut()
+            .rev()
+            .find(|c| &c.crate_id == crate_id)
+        {
             entry.verdict = verdict;
         }
     }
@@ -397,7 +402,11 @@ mod tests {
 
         s.set_verdict(&crate_id("serde"), AnomalyVerdict::Slower);
 
-        let entry = s.recent.iter().find(|c| c.crate_id.name == "serde").unwrap();
+        let entry = s
+            .recent
+            .iter()
+            .find(|c| c.crate_id.name == "serde")
+            .unwrap();
         assert_eq!(entry.verdict, AnomalyVerdict::Slower);
     }
 

@@ -18,19 +18,38 @@ pub mod render;
 pub mod state;
 pub mod system_monitor;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crossterm::event::{Event, KeyCode};
+use crossterm::event::{Event, KeyCode, KeyModifiers};
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use crate::anomaly;
-use crate::model::BuildEvent;
+use crate::model::{Baseline, BuildEvent};
 use crate::persist::BuildRepository;
 use crate::tui::state::TuiState;
+
+/// Look up a crate's baseline, caching the result for the lifetime of the run.
+///
+/// Baselines are immutable for the duration of a build, so the per-tick
+/// in-progress classifier and the per-crate finished classifier can share
+/// one lookup. Without this cache, the ~60 fps tick loop would issue an
+/// async DB query for every active crate on every frame.
+async fn cached_baseline<'a>(
+    cache: &'a mut HashMap<String, Option<Baseline>>,
+    repo: &dyn BuildRepository,
+    name: &str,
+) -> Option<&'a Baseline> {
+    if !cache.contains_key(name) {
+        let fetched = repo.fetch_baseline(name).await.ok().flatten();
+        cache.insert(name.to_string(), fetched);
+    }
+    cache.get(name).and_then(|b| b.as_ref())
+}
 
 /// Run the TUI dashboard until the build finishes, the user quits, or
 /// `cancel` is triggered.
@@ -61,10 +80,7 @@ pub async fn run_tui(
     let original_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         let _ = crossterm::terminal::disable_raw_mode();
-        let _ = crossterm::execute!(
-            std::io::stderr(),
-            crossterm::terminal::LeaveAlternateScreen
-        );
+        let _ = crossterm::execute!(std::io::stderr(), crossterm::terminal::LeaveAlternateScreen);
         original_hook(info);
     }));
 
@@ -73,10 +89,8 @@ pub async fn run_tui(
     impl Drop for TerminalGuard {
         fn drop(&mut self) {
             let _ = crossterm::terminal::disable_raw_mode();
-            let _ = crossterm::execute!(
-                std::io::stdout(),
-                crossterm::terminal::LeaveAlternateScreen
-            );
+            let _ =
+                crossterm::execute!(std::io::stdout(), crossterm::terminal::LeaveAlternateScreen);
         }
     }
     let _guard = TerminalGuard;
@@ -89,6 +103,7 @@ pub async fn run_tui(
     let mut terminal = Terminal::new(backend)?;
 
     let mut state = TuiState::new();
+    let mut baseline_cache: HashMap<String, Option<Baseline>> = HashMap::new();
 
     // Launch system monitor as a background task.
     let (sys_tx, mut sys_rx) = mpsc::channel(4);
@@ -113,12 +128,18 @@ pub async fn run_tui(
                         // For each newly finished crate, look up its baseline
                         // and classify the duration.
                         for crate_id in finished_ids {
-                            if let Some(comp) = state.recent.iter().rev().find(|c| c.crate_id == crate_id) {
-                                let duration = comp.duration;
-                                if let Ok(Some(baseline)) = repo.fetch_baseline(&crate_id.name).await {
-                                    let verdict = anomaly::classify(duration, Some(&baseline), 2.0);
-                                    state.set_verdict(&crate_id, verdict);
-                                }
+                            let duration = state
+                                .recent
+                                .iter()
+                                .rev()
+                                .find(|c| c.crate_id == crate_id)
+                                .map(|c| c.duration);
+                            if let Some(duration) = duration {
+                                let baseline =
+                                    cached_baseline(&mut baseline_cache, &*repo, &crate_id.name)
+                                        .await;
+                                let verdict = anomaly::classify(duration, baseline, 2.0);
+                                state.set_verdict(&crate_id, verdict);
                             }
                         }
 
@@ -140,10 +161,17 @@ pub async fn run_tui(
 
             _ = tick.tick() => {
                 // Non-blocking keyboard check (crossterm synchronous poll).
+                // In raw mode Ctrl-C arrives as a key event, not SIGINT, so it
+                // must be matched explicitly.
                 if crossterm::event::poll(Duration::ZERO)? {
                     if let Event::Key(key) = crossterm::event::read()? {
+                        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
                         match key.code {
                             KeyCode::Char('q') | KeyCode::Char('Q') => {
+                                cancel.cancel();
+                                break;
+                            }
+                            KeyCode::Char('c') | KeyCode::Char('C') if ctrl => {
                                 cancel.cancel();
                                 break;
                             }
@@ -153,16 +181,19 @@ pub async fn run_tui(
                 }
 
                 // Refresh in-progress anomaly verdicts for active crates.
+                // Baselines come from the cache, so this loop performs no DB
+                // I/O after each crate's first lookup — keeping the 60 fps
+                // tick from being blocked by repo awaits.
                 let active_ids: Vec<_> = state.active.keys().cloned().collect();
                 for crate_id in active_ids {
-                    if let Some(active) = state.active.get(&crate_id) {
-                        let elapsed = active.elapsed();
-                        if let Ok(Some(baseline)) = repo.fetch_baseline(&crate_id.name).await {
-                            let verdict =
-                                anomaly::classify_in_progress(elapsed, Some(&baseline), 2.0);
-                            state.set_in_progress_verdict(&crate_id, verdict);
-                        }
-                    }
+                    let elapsed = match state.active.get(&crate_id) {
+                        Some(a) => a.elapsed(),
+                        None => continue,
+                    };
+                    let baseline =
+                        cached_baseline(&mut baseline_cache, &*repo, &crate_id.name).await;
+                    let verdict = anomaly::classify_in_progress(elapsed, baseline, 2.0);
+                    state.set_in_progress_verdict(&crate_id, verdict);
                 }
 
                 terminal.draw(|f| render::render_dashboard(f, &state))?;
