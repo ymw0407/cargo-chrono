@@ -33,6 +33,23 @@ use crate::model::{Baseline, BuildEvent};
 use crate::persist::BuildRepository;
 use crate::tui::state::TuiState;
 
+/// Block in the TUI's keyboard loop until the user presses any key, or
+/// `cancel` is fired. Used after the build finishes so the final dashboard
+/// stays on screen instead of vanishing the moment the alt screen is left.
+fn wait_for_exit_key(cancel: &CancellationToken) -> anyhow::Result<()> {
+    loop {
+        if cancel.is_cancelled() {
+            return Ok(());
+        }
+        if crossterm::event::poll(Duration::from_millis(100))? {
+            if let Event::Key(_) = crossterm::event::read()? {
+                cancel.cancel();
+                return Ok(());
+            }
+        }
+    }
+}
+
 /// Look up a crate's baseline, caching the result for the lifetime of the run.
 ///
 /// Baselines are immutable for the duration of a build, so the per-tick
@@ -145,8 +162,11 @@ pub async fn run_tui(
 
                         // Final render when the build is complete (R12: render
                         // before breaking so the user sees the finished state).
+                        // Wait for a keypress so the result stays on screen
+                        // even when the build was a fast cache hit.
                         if state.is_finished() {
                             terminal.draw(|f| render::render_dashboard(f, &state))?;
+                            wait_for_exit_key(&cancel)?;
                             break;
                         }
                     }
