@@ -126,7 +126,7 @@ fn render_active(frame: &mut Frame, area: Rect, state: &TuiState) {
     } else {
         // Collect and sort by elapsed descending so the slowest sits at top.
         let mut entries: Vec<_> = state.active.values().map(|c| (c, c.elapsed())).collect();
-        entries.sort_by(|a, b| b.1.cmp(&a.1));
+        entries.sort_by_key(|e| std::cmp::Reverse(e.1));
 
         for (comp, elapsed) in entries {
             let verdict = verdict_label(comp.verdict);

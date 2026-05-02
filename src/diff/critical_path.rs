@@ -52,7 +52,7 @@ pub fn compute_critical_path(compilations: &[CrateCompilation]) -> Vec<String> {
     //   2) Toposort and compute the longest weighted path via DP.
     //   3) Backtrack predecessor pointers to recover the full path.
     let mut sorted: Vec<&CrateCompilation> = compilations.iter().collect();
-    sorted.sort_by(|a, b| b.duration.cmp(&a.duration));
+    sorted.sort_by_key(|c| std::cmp::Reverse(c.duration));
     sorted
         .into_iter()
         .map(|c| c.crate_id.name.clone())
