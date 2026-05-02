@@ -86,27 +86,57 @@ pub fn render_ls(builds: &[Build]) {
 
 /// Render a build diff to stdout.
 ///
-/// Shows total duration change, per-crate changes (sorted by impact),
-/// and critical path comparison.
+/// Shows total duration change, per-crate changes (Added/Removed/Changed only —
+/// Unchanged crates are summarised as a single count), and the head of each
+/// critical path. Use `--verbose` (future) to see Unchanged entries.
 pub fn render_diff(diff: &BuildDiff) {
+    /// How many leading nodes of the critical path to show before truncating.
+    const CRITICAL_PATH_HEAD: usize = 15;
+
     println!("Build {} → Build {}", diff.before, diff.after);
     render_duration_change("Total", &diff.total_change);
     println!();
 
-    if diff.crate_changes.is_empty() {
+    let mut added = Vec::new();
+    let mut removed = Vec::new();
+    let mut changed = Vec::new();
+    let mut unchanged_count = 0usize;
+
+    for change in &diff.crate_changes {
+        match change {
+            CrateChange::Added { .. } => added.push(change),
+            CrateChange::Removed { .. } => removed.push(change),
+            CrateChange::Changed { .. } => changed.push(change),
+            CrateChange::Unchanged { .. } => unchanged_count += 1,
+        }
+    }
+
+    // Sort Changed by absolute delta descending so the biggest movers come first.
+    changed.sort_by_key(|c| match c {
+        CrateChange::Changed { change, .. } => std::cmp::Reverse(change.abs_delta_ms.abs()),
+        _ => std::cmp::Reverse(0),
+    });
+
+    if added.is_empty() && removed.is_empty() && changed.is_empty() {
         println!("  No crate-level changes.");
     } else {
-        for change in &diff.crate_changes {
+        for change in changed.iter().chain(added.iter()).chain(removed.iter()) {
             match change {
                 CrateChange::Added { crate_id, duration } => {
-                    println!("  + {} (new) {:.1}s", crate_id, duration.as_secs_f64());
+                    println!("  + {} (new) {:.2}s", crate_id, duration.as_secs_f64());
                 }
                 CrateChange::Removed { crate_id, duration } => {
-                    println!("  - {} (removed) {:.1}s", crate_id, duration.as_secs_f64());
+                    println!("  - {} (gone) {:.2}s", crate_id, duration.as_secs_f64());
                 }
                 CrateChange::Changed { crate_id, change } => {
+                    let arrow = if change.abs_delta_ms > 0 {
+                        "▲"
+                    } else {
+                        "▼"
+                    };
                     println!(
-                        "  ~ {} {:.1}s → {:.1}s ({:+.1}s, {:+.1}%)",
+                        "  {} {} {:.2}s → {:.2}s ({:+.2}s, {:+.1}%)",
+                        arrow,
                         crate_id,
                         change.before.as_secs_f64(),
                         change.after.as_secs_f64(),
@@ -114,22 +144,48 @@ pub fn render_diff(diff: &BuildDiff) {
                         change.pct_delta,
                     );
                 }
-                CrateChange::Unchanged { crate_id, duration } => {
-                    println!("  = {} {:.1}s", crate_id, duration.as_secs_f64());
-                }
+                CrateChange::Unchanged { .. } => {}
             }
         }
     }
 
+    if unchanged_count > 0 {
+        println!("  … {} crates unchanged", unchanged_count);
+    }
+
     println!();
-    println!(
-        "Critical path (before): {}",
-        diff.critical_path_before.join(" → ")
+    print_critical_path(
+        "Critical path (before)",
+        &diff.critical_path_before,
+        CRITICAL_PATH_HEAD,
     );
-    println!(
-        "Critical path (after):  {}",
-        diff.critical_path_after.join(" → ")
+    print_critical_path(
+        "Critical path (after) ",
+        &diff.critical_path_after,
+        CRITICAL_PATH_HEAD,
     );
+}
+
+fn print_critical_path(label: &str, path: &[String], head: usize) {
+    if path.is_empty() {
+        println!("{}: (empty)", label);
+        return;
+    }
+    let total = path.len();
+    let shown: Vec<&String> = path.iter().take(head).collect();
+    print!(
+        "{}: {}",
+        label,
+        shown
+            .iter()
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>()
+            .join(" → ")
+    );
+    if total > head {
+        print!(" → … (+{} more)", total - head);
+    }
+    println!();
 }
 
 fn render_duration_change(label: &str, change: &DurationChange) {
