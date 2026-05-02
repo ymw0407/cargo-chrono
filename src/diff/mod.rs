@@ -5,8 +5,20 @@
 
 pub mod critical_path;
 
-use crate::model::{BuildDiff, BuildId};
+use std::collections::{HashMap, HashSet};
+use std::time::Duration;
+
+use crate::model::{
+    BuildDetails, BuildDiff, BuildId, CrateChange, CrateCompilation, CrateId, DurationChange,
+};
 use crate::persist::BuildRepository;
+
+/// Two crate durations within this many milliseconds of each other are treated
+/// as equivalent and reported as `CrateChange::Unchanged`.
+///
+/// Compilation timing has measurement noise (system load, I/O variance), so
+/// we don't surface tiny deltas as "changes". Tune as needed.
+const UNCHANGED_THRESHOLD_MS: i64 = 5;
 
 /// Compare two builds and produce a detailed diff.
 ///
@@ -28,11 +40,140 @@ use crate::persist::BuildRepository;
 /// Returns an error if either build ID does not exist in the repository
 /// or if a database query fails.
 pub async fn compute_diff(
-    _repo: &dyn BuildRepository,
-    _before: BuildId,
-    _after: BuildId,
+    repo: &dyn BuildRepository,
+    before: BuildId,
+    after: BuildId,
 ) -> anyhow::Result<BuildDiff> {
-    todo!("Fetch both builds, compare crate-by-crate, compute critical paths")
+    // 1) Pull both builds. A missing ID is an error — the caller asked us to
+    //    diff something that doesn't exist.
+    let before_details = repo
+        .fetch_build(before)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("build {} not found", before))?;
+    let after_details = repo
+        .fetch_build(after)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("build {} not found", after))?;
+
+    // 2) Crate-by-crate comparison. We key on `CrateId` (name + version) so that
+    //    different versions of the same crate count as distinct entries.
+    let crate_changes = build_crate_changes(&before_details, &after_details);
+
+    // 3) Total duration change. If a build was interrupted (None), fall back to
+    //    zero so we still produce a consistent DurationChange struct.
+    let before_total = before_details.build.total_duration.unwrap_or_default();
+    let after_total = after_details.build.total_duration.unwrap_or_default();
+    let total_change = duration_change(before_total, after_total);
+
+    // 4) Critical paths.
+    let critical_path_before = critical_path::compute_critical_path(&before_details.compilations);
+    let critical_path_after = critical_path::compute_critical_path(&after_details.compilations);
+
+    Ok(BuildDiff {
+        before,
+        after,
+        total_change,
+        crate_changes,
+        critical_path_before,
+        critical_path_after,
+    })
+}
+
+/// Build the per-crate change list, sorted by absolute delta (largest first).
+///
+/// Walks the union of crates in both builds and classifies each into one of
+/// the four `CrateChange` variants.
+fn build_crate_changes(before: &BuildDetails, after: &BuildDetails) -> Vec<CrateChange> {
+    // CrateId is Hash + Eq, so HashMap is the natural choice. Final ordering
+    // is decided by the sort step below, not iteration order here.
+    let before_map: HashMap<CrateId, &CrateCompilation> = before
+        .compilations
+        .iter()
+        .map(|c| (c.crate_id.clone(), c))
+        .collect();
+    let after_map: HashMap<CrateId, &CrateCompilation> = after
+        .compilations
+        .iter()
+        .map(|c| (c.crate_id.clone(), c))
+        .collect();
+
+    // Union of keys from both sides.
+    let mut all_keys: HashSet<CrateId> = HashSet::new();
+    all_keys.extend(before_map.keys().cloned());
+    all_keys.extend(after_map.keys().cloned());
+
+    let mut changes: Vec<CrateChange> = all_keys
+        .into_iter()
+        .map(|crate_id| {
+            match (before_map.get(&crate_id), after_map.get(&crate_id)) {
+                // Present in both → Changed if delta exceeds the threshold,
+                // otherwise Unchanged.
+                (Some(b), Some(a)) => {
+                    let change = duration_change(b.duration, a.duration);
+                    if change.abs_delta_ms.abs() > UNCHANGED_THRESHOLD_MS {
+                        CrateChange::Changed { crate_id, change }
+                    } else {
+                        CrateChange::Unchanged {
+                            crate_id,
+                            duration: a.duration,
+                        }
+                    }
+                }
+                // Only in `before` → removed.
+                (Some(b), None) => CrateChange::Removed {
+                    crate_id,
+                    duration: b.duration,
+                },
+                // Only in `after` → added.
+                (None, Some(a)) => CrateChange::Added {
+                    crate_id,
+                    duration: a.duration,
+                },
+                // Should be unreachable — the key came from one of the maps.
+                (None, None) => unreachable!("crate id absent from both build maps"),
+            }
+        })
+        .collect();
+
+    // Sort by impact — biggest change first. Added/Removed are scored by their
+    // own duration, Changed by its absolute delta, Unchanged by zero so they
+    // sink to the bottom.
+    changes.sort_by_key(|c| std::cmp::Reverse(change_magnitude(c)));
+    changes
+}
+
+/// Score used to order `CrateChange` entries by impact (descending).
+fn change_magnitude(change: &CrateChange) -> i64 {
+    match change {
+        CrateChange::Changed { change, .. } => change.abs_delta_ms.abs(),
+        CrateChange::Added { duration, .. } | CrateChange::Removed { duration, .. } => {
+            duration.as_millis() as i64
+        }
+        CrateChange::Unchanged { .. } => 0,
+    }
+}
+
+/// Compute a `DurationChange` between two durations.
+///
+/// `abs_delta_ms` is signed (positive = `after` is slower).
+/// `pct_delta` is `0.0` when `before` is zero, to avoid division by zero.
+fn duration_change(before: Duration, after: Duration) -> DurationChange {
+    let before_ms = before.as_millis() as i64;
+    let after_ms = after.as_millis() as i64;
+    let abs_delta_ms = after_ms - before_ms;
+
+    let pct_delta = if before_ms == 0 {
+        0.0
+    } else {
+        (abs_delta_ms as f64 / before_ms as f64) * 100.0
+    };
+
+    DurationChange {
+        before,
+        after,
+        abs_delta_ms,
+        pct_delta,
+    }
 }
 
 #[cfg(test)]
