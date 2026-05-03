@@ -1,134 +1,140 @@
 # CLAUDE.md — cargo-chronoscope
 
-이 파일은 AI 코딩 어시스턴트(Claude Code 등)가 이 프로젝트에서 작업할 때 따라야 할 규칙과 컨텍스트입니다.
+Rules and context that AI coding assistants (Claude Code, etc.) must follow when
+working in this repository.
 
-## 프로젝트 개요
+## Project overview
 
-cargo-chronoscope는 Rust의 Cargo 빌드 이벤트 스트림을 수집·저장·분석하는 CLI 도구입니다.
-4개 명령(record, watch, ls, diff)을 제공하며, 3인 팀이 모듈별로 분리 개발합니다.
+`cargo-chronoscope` is a CLI tool that observes Cargo's build event stream and
+records, diffs, and visualises Rust build performance. It exposes four
+commands (`record`, `watch`, `ls`, `diff`) and was originally built by a
+three-person team that split ownership by module (see
+[`docs/internal/ROLE_OWNERSHIP.md`](docs/internal/ROLE_OWNERSHIP.md)).
 
-## 빌드 & 검증 명령
+## Build & verification commands
 
 ```bash
-cargo check                          # 컴파일 확인
-cargo test                           # 테스트 실행
-cargo clippy -- -D warnings          # lint (경고를 에러로)
-cargo fmt --check                    # 포맷 확인
-cargo run --example ratatui_hello    # TUI 예제 실행
+cargo check                          # type-check
+cargo test                           # run tests
+cargo clippy -- -D warnings          # lint (treat warnings as errors)
+cargo fmt --check                    # format check
+cargo run --example ratatui_hello    # TUI demo
 ```
 
-PR 제출 전 반드시 `cargo fmt --check && cargo clippy -- -D warnings && cargo test`를 모두 통과해야 합니다.
+Every PR **must** pass `cargo fmt --check && cargo clippy -- -D warnings && cargo test`
+before being submitted.
 
-## 모듈 소유권 (절대 규칙)
+## Module ownership (hard rule)
 
-| 역할 | 소유 모듈 |
-|------|----------|
+| Role | Owned modules |
+|------|---------------|
 | **Integrator** | `src/model/`, `src/cli/`, `src/supervisor/`, `src/parser/`, `src/main.rs`, `Cargo.toml` |
 | **Data** | `src/persist/`, `src/diff/` |
 | **Realtime** | `src/broker/`, `src/anomaly/`, `src/tui/` |
 
-**자기 소유가 아닌 모듈의 코드를 수정하지 마세요.** 다른 역할의 모듈 변경이 필요하면 해당 담당자에게 요청하거나 이슈를 생성하세요.
+**Do not modify code in modules you do not own.** If your change requires a
+cross-role edit, file an issue and tag the relevant owner — see
+[`docs/internal/ROLE_OWNERSHIP.md`](docs/internal/ROLE_OWNERSHIP.md).
 
-## 의존성 방향 (절대 규칙)
+## Dependency direction (hard rule)
 
 ```
-model/ ← 모든 모듈에서 import 가능 (model/은 다른 모듈을 import 금지)
-Data ↔ Realtime : 서로 직접 import 금지
-Realtime → Data : persist::BuildRepository trait만 import 가능 (SqliteRepository 직접 import 금지)
-main.rs : 전체 모듈을 조립하는 유일한 장소
+model/  ← every module may import; model/ must not depend on any other src/ module
+Data ↔ Realtime          not allowed in either direction
+Realtime → Data          only via the persist::BuildRepository trait
+                         (no SqliteRepository imports)
+main.rs                  the single assembly point for cross-role wiring
 ```
 
-이 의존성 방향을 위반하는 코드를 작성하지 마세요. `use crate::tui` 같은 import가 `persist/` 안에 있으면 안 됩니다.
+Code that violates these rules will be rejected. `use crate::tui` inside
+`persist/` is forbidden.
 
-## 코드 컨벤션
+## Code conventions
 
-### 에러 처리
-- 공개 API 반환: `anyhow::Result<T>`
-- 모듈 내부 에러 타입: `thiserror`로 정의
-- `unwrap()`/`expect()`는 테스트 코드에서만 허용. 프로덕션 코드에서는 `?` 연산자 사용.
+### Error handling
+- Public APIs return `anyhow::Result<T>`.
+- Module-internal error types use `thiserror`.
+- `unwrap()` / `expect()` are allowed only in test code. Production code uses
+  the `?` operator.
 
-### 비동기
-- 모든 비동기 코드는 tokio 런타임 기반
-- trait에 async fn이 필요하면 `#[async_trait]` 사용
-- 채널은 `tokio::sync::mpsc` bounded, 기본 용량 1024
-- 취소는 `tokio_util::sync::CancellationToken`으로 전파
+### Async
+- All async runs on the tokio runtime.
+- For traits that need `async fn`, use `#[async_trait]`.
+- Channels are bounded `tokio::sync::mpsc`, default capacity 1024.
+- Cancellation is propagated via `tokio_util::sync::CancellationToken`.
 
-### 스타일
-- `cargo fmt`을 따름 (기본 rustfmt 설정)
-- 모든 public 함수, struct, enum, trait에 `///` doc comment 필수
-- doc comment에 `# Arguments`, `# Returns`, `# Errors` 섹션으로 계약 명시
-- 모듈 파일 최상단에 `//!` 모듈 doc comment 필수
+### Style
+- Follow `cargo fmt` (default rustfmt config).
+- Every public function, struct, enum, and trait needs a `///` doc comment.
+- Doc comments specify the contract via `# Arguments`, `# Returns`, `# Errors`
+  sections.
+- Every module file must start with a `//!` module-level doc comment.
 
-### 커밋
-- Conventional Commits 형식: `<type>(<scope>): <description>`
-- type: feat, fix, refactor, test, docs, chore, perf, style
-- scope: 모듈 이름 (model, cli, supervisor, parser, persist, diff, broker, anomaly, tui, main)
-- 예: `feat(persist): implement begin_build with SQLite INSERT`
-- 상세 규칙: `.github/COMMIT_CONVENTION.md` 참고
+### Commits
+- [Conventional Commits](https://www.conventionalcommits.org/): `<type>(<scope>): <description>`
+- type: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`, `perf`, `style`
+- scope: module name (`model`, `cli`, `supervisor`, `parser`, `persist`,
+  `diff`, `broker`, `anomaly`, `tui`, `main`)
+- Example: `feat(persist): implement begin_build with SQLite INSERT`
+- Full rules: [`.github/COMMIT_CONVENTION.md`](.github/COMMIT_CONVENTION.md).
 
-### 브랜치
+### Branches
 - `feat/<role>/<topic>`, `fix/<role>/<topic>`, `test/<role>/<topic>`
-- 예: `feat/data/sqlite-crud`, `fix/realtime/tui-crash-on-exit`
+- Examples: `feat/data/sqlite-crud`, `fix/realtime/tui-crash-on-exit`
 
-## 핵심 아키텍처 패턴
+## Core architecture patterns
 
-### 이벤트 파이프라인 (Record 모드)
+### Event pipeline (record mode)
 ```
 Supervisor → mpsc<String> → Parser → mpsc<BuildEvent> → Persister → DB
 ```
 
-### 이벤트 파이프라인 (Watch 모드)
+### Event pipeline (watch mode)
 ```
 Supervisor → Parser → Broker ─┬→ Persister → DB
-                               └→ TUI → Terminal
+                              └→ TUI → Terminal
 ```
 
-### BuildEvent 스트림 계약
-- 첫 이벤트: 반드시 `BuildStarted`
-- 마지막 이벤트: 반드시 `BuildFinished`
-- `CompilationFinished`에는 `duration`, `started_at`, `finished_at`가 항상 포함
+### BuildEvent stream contract
+- First event: always `BuildStarted`.
+- Last event: always `BuildFinished`.
+- `CompilationFinished` always carries `duration`, `started_at`, `finished_at`.
 
-### DB 위치
-`<project_root>/.cargo-chronoscope/history.db` (SQLite, WAL mode)
+### DB location
+`<project_root>/.cargo-chronoscope/history.db` (SQLite, WAL mode).
 
-### BuildId 발급
-Persister가 `BuildStarted` 이벤트를 받을 때 DB INSERT → AUTOINCREMENT로 발급
+### BuildId allocation
+Issued by the Persister on `BuildStarted` via SQLite `AUTOINCREMENT`.
 
-## todo!() 스텁 상태
+## Testing rules
 
-현재 스켈레톤 단계입니다. 다음 함수들이 실제로 구현되어 있습니다:
-- `anomaly::classify()`, `anomaly::classify_in_progress()` + 테스트 8개
-- `persist::SqliteRepository::open()` (DB 열기, WAL, 마이그레이션)
-- `persist::migrations::run_migrations()` (DDL)
-- `cli::render_ls()`, `cli::render_diff()` (텍스트 출력)
-- `src/main.rs` 전체 흐름 (파싱 → 분기 → task 조립)
+- Every public function has a unit test.
+- Tests live in the same file under `#[cfg(test)] mod tests {}`.
+- Cross-module integration tests go in `tests/`.
+- Test fixtures go in `tests/fixtures/`.
+- DB tests use `tempfile::TempDir` for an isolated database.
+- Async tests use `#[tokio::test]`.
 
-나머지는 `todo!()` 스텁입니다. `#![allow(dead_code)]`가 `main.rs`에 설정되어 있으며, 모듈 구현이 완료되면 제거해야 합니다.
+## Notes
 
-## 테스트 작성 규칙
+- Do **not** use the `cargo_metadata` crate. Parse cargo's JSON directly with
+  `serde_json`.
+- `rusqlite::Connection` is **not** `Sync`. Wrap it in `tokio::sync::Mutex`.
+- The TUI uses raw mode. Terminal restoration must be guaranteed even on
+  panic (RAII guard + panic hook).
+- Only the Integrator role modifies `Cargo.toml`. If you need a new
+  dependency, ask the Integrator.
 
-- 구현한 모든 public 함수에 단위 테스트 작성
-- 테스트는 같은 파일의 `#[cfg(test)] mod tests {}` 블록에 위치
-- 통합 테스트는 `tests/` 디렉터리
-- 테스트 픽스처는 `tests/fixtures/` — `sample_output.jsonl`이 여기 들어갈 예정
-- DB 테스트는 `tempfile::TempDir`로 임시 DB 생성
-- `tokio::test`로 비동기 테스트
+## Reference documents
 
-## 주의사항
-
-- `cargo_metadata` 크레이트를 사용하지 마세요. `serde_json`으로 직접 파싱합니다.
-- `rusqlite::Connection`은 `Sync`이 아닙니다. `tokio::sync::Mutex`로 감싸서 사용합니다.
-- TUI는 raw mode를 사용합니다. panic 시에도 터미널 복원이 보장되어야 합니다.
-- `Cargo.toml` 수정은 Integrator 역할만 합니다. 의존성 추가가 필요하면 Integrator에게 요청하세요.
-
-## 참고 문서
-
-- `docs/internal/DESIGN.md` — 전체 설계 (시나리오, 아키텍처, 스키마, 분업)
-- `docs/internal/CONCURRENCY.md` — 예상되는 race condition 12개와 대응 전략 (구현 체크리스트 포함)
-- `docs/internal/ONBOARDING.md` — 역할별 Day 1 체크리스트
-- `docs/internal/AGENTS.md` — 역할별 AI 에이전트 협업 가이드
-- `docs/internal/ROLE_OWNERSHIP.md` — 모듈 소유권 / GitHub ID 매핑 (영문)
-- `docs/internal/PROJECT_HISTORY.md` — 완료 기록 (영문)
-- `README.md` — 사용자용 영문 문서 (open source release)
-- `.github/COMMIT_CONVENTION.md` — 커밋 컨벤션 상세
-- `.github/CONTRIBUTING.md` — 기여 가이드
+- [`README.md`](README.md) — user-facing English documentation.
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — how to contribute (external contributors).
+- [`.github/COMMIT_CONVENTION.md`](.github/COMMIT_CONVENTION.md) — detailed commit rules.
+- [`.github/CONTRIBUTING.md`](.github/CONTRIBUTING.md) — detailed dev workflow.
+- [`docs/internal/`](docs/internal/) — historical planning docs (in Korean):
+  - `DESIGN.md` — full design (scenarios, architecture, schema, role split).
+  - `CONCURRENCY.md` — anticipated race conditions and mitigations.
+  - `ONBOARDING.md` — Day-1 checklist per role.
+  - `AGENTS.md` — per-role AI assistant collaboration guide.
+  - `ROLE_OWNERSHIP.md` — module ownership / GitHub ID mapping (English).
+  - `PROJECT_HISTORY.md` — completion record (English).

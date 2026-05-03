@@ -1,8 +1,8 @@
 # Commit Convention
 
-이 프로젝트는 [Conventional Commits](https://www.conventionalcommits.org/ko/) 규칙을 따릅니다.
+This project follows [Conventional Commits](https://www.conventionalcommits.org/).
 
-## 형식
+## Format
 
 ```
 <type>(<scope>): <description>
@@ -14,23 +14,23 @@
 
 ## Type
 
-| Type | 설명 |
-|------|------|
-| `feat` | 새로운 기능 추가 |
-| `fix` | 버그 수정 |
-| `refactor` | 기능 변경 없는 코드 개선 |
-| `test` | 테스트 추가 또는 수정 |
-| `docs` | 문서 변경 |
-| `chore` | 빌드, CI, 의존성 등 기타 변경 |
-| `perf` | 성능 개선 |
-| `style` | 코드 포맷팅 (기능 변경 없음) |
+| Type | Meaning |
+|------|---------|
+| `feat` | New feature |
+| `fix` | Bug fix |
+| `refactor` | Code change that does not alter behaviour |
+| `test` | Adding or fixing tests |
+| `docs` | Documentation only |
+| `chore` | Build, CI, dependencies, or other miscellany |
+| `perf` | Performance improvement |
+| `style` | Formatting / whitespace (no behavioural change) |
 
 ## Scope
 
-모듈 이름을 scope로 사용합니다.
+`<scope>` is the module name. Each scope has an owning role.
 
-| Scope | 소유 역할 |
-|-------|----------|
+| Scope | Owning role |
+|-------|-------------|
 | `model` | Integrator |
 | `cli` | Integrator |
 | `supervisor` | Integrator |
@@ -41,10 +41,14 @@
 | `anomaly` | Realtime |
 | `tui` | Realtime |
 | `main` | Integrator |
-| `ci` | 공용 |
-| `docs` | 공용 |
+| `ci` | shared |
+| `docs` | shared |
 
-## 예시
+A commit that touches multiple modules should usually be split. If it
+genuinely cannot be split, pick the dominant scope and call out the rest
+in the commit body.
+
+## Examples
 
 ```
 feat(supervisor): implement cargo process spawn and stdout streaming
@@ -77,25 +81,29 @@ Aligns naming with the design document terminology.
 BREAKING CHANGE: CompilationRecord is now CrateCompilation
 ```
 
-## 규칙
+## Rules
 
-1. **제목은 50자 이내**, 영문 소문자로 시작, 마침표 없음
-2. **본문은 72자에서 줄바꿈** (선택사항)
-3. **Breaking change**가 있으면 footer에 `BREAKING CHANGE:` 명시
-4. **이슈 연결**: `Closes #N`, `Fixes #N`, `Refs #N`
-5. 하나의 커밋에 하나의 논리적 변경만 포함
+1. **Subject line ≤ 50 characters**, lowercase, no trailing period.
+2. **Body wraps at 72 characters** (optional).
+3. **Breaking changes** must be flagged with `BREAKING CHANGE:` in the
+   footer.
+4. **Issue linking**: use `Closes #N`, `Fixes #N`, or `Refs #N` in the
+   footer.
+5. One logical change per commit.
 
-## 브랜치 네이밍
+## Branch naming
 
 ```
-feat/<role>/<topic>     # 새 기능: feat/data/sqlite-crud
-fix/<role>/<topic>      # 버그 수정: fix/realtime/tui-crash-on-exit
-refactor/<role>/<topic> # 리팩터링: refactor/integrator/parser-error-handling
-docs/<topic>            # 문서: docs/update-design
-test/<role>/<topic>     # 테스트: test/anomaly/edge-cases
+feat/<role>/<topic>      # new feature        — feat/data/sqlite-crud
+fix/<role>/<topic>       # bug fix            — fix/realtime/tui-crash-on-exit
+refactor/<role>/<topic>  # refactor           — refactor/integrator/parser-error-handling
+docs/<topic>             # documentation      — docs/update-design
+test/<role>/<topic>      # tests              — test/anomaly/edge-cases
+chore/<topic>            # CI / config / etc. — chore/rename-to-cargo-chronoscope
 ```
 
-예시:
+Examples:
 - `feat/data/sqlite-crud`
 - `feat/realtime/broker-publish-loop`
 - `fix/integrator/supervisor-kill-signal`
+- `docs/opensource-release-prep`

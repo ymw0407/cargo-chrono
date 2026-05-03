@@ -1,0 +1,87 @@
+name: Bug Report
+description: Report a defect you've encountered.
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report. Please fill in the
+        sections below so we can reproduce and fix the issue quickly.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: Clearly describe what went wrong.
+      placeholder: When I run `cargo-chronoscope watch`, the dashboard shows …
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: A minimal sequence of commands or actions that reproduces the bug.
+      placeholder: |
+        1. Run `cargo-chronoscope record`
+        2. Press `Ctrl-C` after 5 seconds
+        3. Observe `cargo-chronoscope ls`
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+      description: What should have happened.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+      description: What happened instead. Include the full error message or panic if any.
+      render: text
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      description: e.g. macOS 14.5, Ubuntu 24.04, Windows 11.
+      placeholder: macOS 14.5
+    validations:
+      required: true
+
+  - type: input
+    id: rust-version
+    attributes:
+      label: Rust version
+      description: Output of `rustc --version`.
+      placeholder: rustc 1.92.0 (...)
+    validations:
+      required: true
+
+  - type: input
+    id: chronoscope-version
+    attributes:
+      label: cargo-chronoscope version
+      description: Output of `cargo-chronoscope --version`, or the commit hash you built from.
+      placeholder: 0.1.0 / commit cfb268e
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Screenshots, logs, related configuration, anything else useful.
+    validations:
+      required: false

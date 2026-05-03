@@ -1,23 +1,23 @@
-## 요약
+## Summary
 
-<!-- 이 PR이 무엇을 하는지 1-3줄로 설명하세요. -->
+<!-- One to three lines describing what this PR does. -->
 
-## 변경 유형
+## Type of change
 
-- [ ] feat: 새 기능
-- [ ] fix: 버그 수정
-- [ ] refactor: 기능 변경 없는 코드 개선
-- [ ] test: 테스트 추가/수정
-- [ ] docs: 문서 변경
-- [ ] chore: 빌드, CI, 의존성 등 기타
+- [ ] feat: new feature
+- [ ] fix: bug fix
+- [ ] refactor: code change with no behavioural difference
+- [ ] test: tests only
+- [ ] docs: documentation only
+- [ ] chore: build, CI, dependencies, or other miscellany
 
-## 관련 이슈
+## Related issue
 
-<!-- closes #123 또는 관련 이슈 번호 -->
+<!-- Closes #123, Fixes #123, or Refs #123 -->
 
-## 변경된 모듈
+## Affected modules
 
-- [ ] `model/` (공용 타입)
+- [ ] `model/` (shared types)
 - [ ] `cli/`
 - [ ] `supervisor/`
 - [ ] `parser/`
@@ -27,15 +27,15 @@
 - [ ] `anomaly/`
 - [ ] `tui/`
 - [ ] `main.rs`
-- [ ] 문서/CI/설정
+- [ ] docs / CI / config
 
-## 테스트
+## Tests
 
-- [ ] `cargo test` 통과
-- [ ] `cargo clippy -- -D warnings` 통과
-- [ ] 새 기능에 대한 단위 테스트 추가됨
-- [ ] 수동 테스트 완료 (해당 시 설명):
+- [ ] `cargo test` passes
+- [ ] `cargo clippy -- -D warnings` passes
+- [ ] Unit tests added for new behaviour
+- [ ] Manual test performed (describe below if applicable):
 
-## 리뷰어 참고사항
+## Notes for reviewers
 
-<!-- 리뷰어가 알아야 할 맥락, 트레이드오프, 또는 주의할 부분이 있으면 적어주세요. -->
+<!-- Context, trade-offs, things to watch out for, sample output, etc. -->
