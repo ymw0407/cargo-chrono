@@ -1,7 +1,6 @@
 # Rust / Cargo
 /target/
 **/*.rs.bk
-Cargo.lock
 
 # cargo-chrono local data
 .cargo-chrono/
