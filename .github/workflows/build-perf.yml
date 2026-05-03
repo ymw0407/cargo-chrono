@@ -32,9 +32,22 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      # Deliberately no rust-cache here: a warm target/ directory makes most
-      # crates compile in ~0s, which masks the per-crate timing signal we
-      # actually want to measure.
+      # Cache scoped to the *install* target directory only.
+      #
+      # The chronoscope binary built from this PR's source must be cached
+      # to keep CI fast, but the workspace's own `./target/` MUST stay
+      # cold so the `record` step measures a full release build with
+      # meaningful per-crate timings. We solve this by giving the install
+      # step a separate target dir (/tmp/install-target via CARGO_TARGET_DIR
+      # below) and pointing rust-cache at that dir alone.
+      #
+      # `save-if` restricts cache writes to baseline-branch pushes so PR
+      # runs never overwrite the canonical install cache.
+      - name: Cache install artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: '. -> /tmp/install-target'
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
       - name: Restore chronoscope history
         uses: actions/cache/restore@v4
@@ -45,11 +58,18 @@ jobs:
             chronoscope-db-
 
       - name: Install cargo-chronoscope (from this repo's source)
-        # Build the binary from the checked-out source rather than crates.io so
-        # CI exercises the version under review. `--locked` honours Cargo.lock.
+        # Build the binary from the checked-out source rather than crates.io
+        # so CI exercises the version under review. `--locked` honours
+        # Cargo.lock. CARGO_TARGET_DIR sends compiled artifacts to a
+        # scratch path so the workspace's ./target/ remains untouched —
+        # see the rust-cache step above for why this matters.
+        env:
+          CARGO_TARGET_DIR: /tmp/install-target
         run: cargo install --path . --locked
 
       - name: Record build
+        # ./target/ is empty, so this triggers a full cold release build
+        # and produces real per-crate timings for the diff.
         run: cargo-chronoscope record -- --release
 
       - name: Show recent builds

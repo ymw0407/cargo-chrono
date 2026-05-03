@@ -82,16 +82,24 @@ runs:
         restore-keys: |
           ${{ inputs.cache-key-prefix }}-
 
+    - name: Install cargo-binstall
+      uses: cargo-bins/cargo-binstall@main
+
     - name: Install cargo-chronoscope
       shell: bash
       env:
         VERSION: ${{ inputs.version }}
+      # cargo-binstall pulls a prebuilt archive from the GitHub Release that
+      # matches the requested version; on a miss it falls back to building
+      # from source via `cargo install`. Either way the binary lands in
+      # ~/.cargo/bin without polluting the workspace's target/ directory,
+      # which keeps cargo-chronoscope's per-crate timing signal intact.
       run: |
         set -euo pipefail
         if [ "$VERSION" = "latest" ]; then
-          cargo install cargo-chronoscope --locked
+          cargo binstall --no-confirm cargo-chronoscope
         else
-          cargo install cargo-chronoscope --version "$VERSION" --locked
+          cargo binstall --no-confirm --version "$VERSION" cargo-chronoscope
         fi
 
     - name: Record build
