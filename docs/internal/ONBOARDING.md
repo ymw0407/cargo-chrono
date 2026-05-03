@@ -6,7 +6,7 @@
 
 - [ ] `cargo check` 통과 확인
 - [ ] `cargo test` 통과 확인 (anomaly 테스트)
-- [ ] `docs/DESIGN.md` 읽기 — 전체 아키텍처, 데이터 모델, 병렬성 구조 이해
+- [ ] `docs/internal/DESIGN.md` 읽기 — 전체 아키텍처, 데이터 모델, 병렬성 구조 이해
 - [ ] 자기 소유 모듈의 `todo!()` 위치 파악
 - [ ] feature 브랜치 생성: `feat/<role>/day1`
 

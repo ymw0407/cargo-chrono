@@ -259,7 +259,7 @@ GROUP BY crate_name;
 ### 10.1 Race Condition 분석
 
 5개 async task가 동시에 돌기 때문에 아래와 같은 race condition이 예상된다.
-구현 전에 **[docs/CONCURRENCY.md](CONCURRENCY.md)** 를 읽고, PR 머지 전에 해당 문서의
+구현 전에 **[CONCURRENCY.md](CONCURRENCY.md)** 를 읽고, PR 머지 전에 해당 문서의
 "구현 체크리스트"로 검증한다.
 
 주요 race condition 요약:
@@ -274,7 +274,7 @@ GROUP BY crate_name;
 | R11 | HIGH | TUI raw mode 복원 실패로 사용자 터미널 망가짐 | Realtime |
 | R12 | MID  | Shutdown 시 TUI 종료와 stdout 메시지 인터리브 | Integrator, Realtime |
 
-전체 12개 race condition과 대응 전략은 `docs/CONCURRENCY.md` 참조.
+전체 12개 race condition과 대응 전략은 `CONCURRENCY.md` 참조.
 
 ## 11. 발표 전략
 
