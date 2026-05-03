@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-05-03
+
+### Changed
+- Repository renamed from `ymw0407/cargo-chrono` to `ymw0407/cargo-chronoscope` to match the published crate name. All in-repo links updated to the canonical URL; old URLs continue to redirect.
+- `cd cargo-chrono` clone instructions updated to `cd cargo-chronoscope` to match the new default directory name produced by `git clone`.
+
 ## [0.1.4] - 2026-05-03
 
 ### Fixed
@@ -54,9 +60,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SQLite-backed history at `<workspace>/.cargo-chronoscope/history.db`.
 - Anomaly classifier (mean ± 2σ) and ratatui dashboard.
 
-[Unreleased]: https://github.com/ymw0407/cargo-chrono/compare/v0.1.4...HEAD
-[0.1.4]: https://github.com/ymw0407/cargo-chrono/compare/v0.1.3...v0.1.4
-[0.1.3]: https://github.com/ymw0407/cargo-chrono/compare/v0.1.2...v0.1.3
-[0.1.2]: https://github.com/ymw0407/cargo-chrono/compare/v0.1.1...v0.1.2
-[0.1.1]: https://github.com/ymw0407/cargo-chrono/compare/v0.1.0...v0.1.1
-[0.1.0]: https://github.com/ymw0407/cargo-chrono/releases/tag/v0.1.0
+[Unreleased]: https://github.com/ymw0407/cargo-chronoscope/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/ymw0407/cargo-chronoscope/compare/v0.1.4...v0.1.5
+[0.1.4]: https://github.com/ymw0407/cargo-chronoscope/compare/v0.1.3...v0.1.4
+[0.1.3]: https://github.com/ymw0407/cargo-chronoscope/compare/v0.1.2...v0.1.3
+[0.1.2]: https://github.com/ymw0407/cargo-chronoscope/compare/v0.1.1...v0.1.2
+[0.1.1]: https://github.com/ymw0407/cargo-chronoscope/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/ymw0407/cargo-chronoscope/releases/tag/v0.1.0

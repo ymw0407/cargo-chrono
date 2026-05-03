@@ -15,7 +15,7 @@ Only the latest published version on [crates.io](https://crates.io/crates/cargo-
 
 Use GitHub's private vulnerability reporting instead:
 
-- https://github.com/ymw0407/cargo-chrono/security/advisories/new
+- https://github.com/ymw0407/cargo-chronoscope/security/advisories/new
 
 You can expect:
 

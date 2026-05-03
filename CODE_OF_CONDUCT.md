@@ -6,6 +6,6 @@ The full text is available at the link above. By participating in this project (
 
 ## Reporting
 
-If you experience or witness behaviour that violates this Code, please report it privately by opening a confidential security advisory at https://github.com/ymw0407/cargo-chrono/security/advisories/new (the channel is labelled "security" but works equally well for conduct reports — only repository maintainers can read it).
+If you experience or witness behaviour that violates this Code, please report it privately by opening a confidential security advisory at https://github.com/ymw0407/cargo-chronoscope/security/advisories/new (the channel is labelled "security" but works equally well for conduct reports — only repository maintainers can read it).
 
 Reports will be reviewed and investigated promptly and fairly. Maintainers are obligated to respect the privacy and security of the reporter of any incident.

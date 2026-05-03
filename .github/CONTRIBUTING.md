@@ -8,8 +8,8 @@ detailed development workflow used by the team and regular contributors.
 
 ```bash
 # Clone
-git clone https://github.com/ymw0407/cargo-chrono.git
-cd cargo-chrono
+git clone https://github.com/ymw0407/cargo-chronoscope.git
+cd cargo-chronoscope
 
 # Type-check
 cargo check
@@ -84,12 +84,12 @@ When a fix or feature unavoidably touches another role's module:
    (`(touches persist/)`).
 
 Recent precedents:
-- [PR #10](https://github.com/ymw0407/cargo-chrono/pull/10) added
+- [PR #10](https://github.com/ymw0407/cargo-chronoscope/pull/10) added
   `BuildRepository::delete_build` (Data) so the Integrator could discard
-  cancelled builds. Coordinated via [issue #9](https://github.com/ymw0407/cargo-chrono/issues/9).
-- [PR #11](https://github.com/ymw0407/cargo-chrono/pull/11) was pure Data work
+  cancelled builds. Coordinated via [issue #9](https://github.com/ymw0407/cargo-chronoscope/issues/9).
+- [PR #11](https://github.com/ymw0407/cargo-chronoscope/pull/11) was pure Data work
   (busy_timeout, atomic migrations). Tracked via
-  [issue #3](https://github.com/ymw0407/cargo-chrono/issues/3).
+  [issue #3](https://github.com/ymw0407/cargo-chronoscope/issues/3).
 
 ## Testing rules
 

@@ -1,12 +1,12 @@
 [package]
 name = "cargo-chronoscope"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 description = "Cargo build performance observer — record, diff, and watch your Rust builds"
 license = "MIT"
 readme = "README.md"
-repository = "https://github.com/ymw0407/cargo-chrono"
-homepage = "https://github.com/ymw0407/cargo-chrono"
+repository = "https://github.com/ymw0407/cargo-chronoscope"
+homepage = "https://github.com/ymw0407/cargo-chronoscope"
 keywords = ["cargo", "build", "performance", "profiling"]
 categories = ["development-tools::profiling", "command-line-utilities"]
 include = [

@@ -23,7 +23,7 @@ body:
       label: Owning role
       description: |
         Which role's modules does this task touch?
-        See [ROLE_OWNERSHIP](https://github.com/ymw0407/cargo-chrono/blob/main/docs/internal/ROLE_OWNERSHIP.md).
+        See [ROLE_OWNERSHIP](https://github.com/ymw0407/cargo-chronoscope/blob/main/docs/internal/ROLE_OWNERSHIP.md).
       options:
         - Integrator
         - Data

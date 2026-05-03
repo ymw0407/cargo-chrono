@@ -5,7 +5,7 @@ report issues, propose changes, and get a pull request merged.
 
 ## Quick links
 
-- **Bugs / feature requests**: [open an issue](https://github.com/ymw0407/cargo-chrono/issues/new/choose)
+- **Bugs / feature requests**: [open an issue](https://github.com/ymw0407/cargo-chronoscope/issues/new/choose)
 - **Code style & commit format**: [`.github/COMMIT_CONVENTION.md`](.github/COMMIT_CONVENTION.md)
 - **Detailed dev workflow**: [`.github/CONTRIBUTING.md`](.github/CONTRIBUTING.md)
 - **Module ownership**: [`docs/internal/ROLE_OWNERSHIP.md`](docs/internal/ROLE_OWNERSHIP.md)
@@ -35,8 +35,8 @@ issue so the right people can review.
 ## Setting up your environment
 
 ```bash
-git clone https://github.com/ymw0407/cargo-chrono.git
-cd cargo-chrono
+git clone https://github.com/ymw0407/cargo-chronoscope.git
+cd cargo-chronoscope
 
 # Pre-flight check — must pass before opening a PR.
 cargo fmt --check

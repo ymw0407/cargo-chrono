@@ -30,7 +30,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
 
-      - uses: ymw0407/cargo-chrono@action-v1
+      - uses: ymw0407/cargo-chronoscope@action-v1
         with:
           # cargo-chronoscope binary version pulled from crates.io. Pin a
           # concrete version for reproducibility, or use `latest`.
