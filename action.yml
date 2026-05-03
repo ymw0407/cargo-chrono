@@ -1,8 +1,7 @@
 name: 'cargo-chronoscope'
 description: >-
-  Record and diff Cargo build performance. Caches the history database
-  with the baseline branch as the canonical source, and (optionally)
-  posts a sticky PR comment summarising the change.
+  Record and diff Cargo build performance. Caches a baseline DB per
+  branch and posts a sticky PR comment with the diff.
 author: 'ymw0407'
 
 branding:
