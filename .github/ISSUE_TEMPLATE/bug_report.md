@@ -12,7 +12,7 @@ assignees: ''
 
 ## 재현 단계
 
-1. `cargo-chrono ...` 실행
+1. `cargo-chronoscope ...` 실행
 2. ...
 3. ...
 
@@ -28,7 +28,7 @@ assignees: ''
 
 - OS: <!-- e.g. macOS 14.5, Ubuntu 24.04 -->
 - Rust: <!-- `rustc --version` 출력 -->
-- cargo-chrono: <!-- `cargo-chrono --version` 또는 커밋 해시 -->
+- cargo-chronoscope: <!-- `cargo-chronoscope --version` 또는 커밋 해시 -->
 
 ## 추가 컨텍스트
 

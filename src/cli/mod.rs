@@ -6,9 +6,9 @@ use clap::{Parser, Subcommand};
 
 use crate::model::{Build, BuildDiff, BuildId, CrateChange, DurationChange};
 
-/// cargo-chrono — Cargo build performance observer.
+/// cargo-chronoscope — Cargo build performance observer.
 #[derive(Parser, Debug)]
-#[command(name = "cargo-chrono", version, about)]
+#[command(name = "cargo-chronoscope", version, about)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
@@ -302,7 +302,7 @@ mod tests {
 
     #[test]
     fn parse_ls_defaults_last_to_10() {
-        let cli = Cli::try_parse_from(["cargo-chrono", "ls"]).unwrap();
+        let cli = Cli::try_parse_from(["cargo-chronoscope", "ls"]).unwrap();
         match cli.command {
             Command::Ls { last } => assert_eq!(last, 10),
             other => panic!("expected Ls, got {:?}", other),
@@ -311,7 +311,7 @@ mod tests {
 
     #[test]
     fn parse_ls_with_explicit_last() {
-        let cli = Cli::try_parse_from(["cargo-chrono", "ls", "--last", "5"]).unwrap();
+        let cli = Cli::try_parse_from(["cargo-chronoscope", "ls", "--last", "5"]).unwrap();
         match cli.command {
             Command::Ls { last } => assert_eq!(last, 5),
             _ => panic!("expected Ls"),
@@ -320,8 +320,8 @@ mod tests {
 
     #[test]
     fn parse_record_forwards_cargo_args() {
-        let cli =
-            Cli::try_parse_from(["cargo-chrono", "record", "--release", "-p", "demo"]).unwrap();
+        let cli = Cli::try_parse_from(["cargo-chronoscope", "record", "--release", "-p", "demo"])
+            .unwrap();
         match cli.command {
             Command::Record { cargo_args } => {
                 assert_eq!(cargo_args, vec!["--release", "-p", "demo"]);
@@ -332,7 +332,7 @@ mod tests {
 
     #[test]
     fn parse_watch_forwards_cargo_args() {
-        let cli = Cli::try_parse_from(["cargo-chrono", "watch", "--release"]).unwrap();
+        let cli = Cli::try_parse_from(["cargo-chronoscope", "watch", "--release"]).unwrap();
         match cli.command {
             Command::Watch { cargo_args } => {
                 assert_eq!(cargo_args, vec!["--release"]);
@@ -343,7 +343,7 @@ mod tests {
 
     #[test]
     fn parse_diff_requires_two_ids() {
-        let cli = Cli::try_parse_from(["cargo-chrono", "diff", "3", "7"]).unwrap();
+        let cli = Cli::try_parse_from(["cargo-chronoscope", "diff", "3", "7"]).unwrap();
         match cli.command {
             Command::Diff { before, after } => {
                 assert_eq!(before, 3);
@@ -355,7 +355,7 @@ mod tests {
 
     #[test]
     fn parse_diff_missing_args_errors() {
-        let result = Cli::try_parse_from(["cargo-chrono", "diff", "1"]);
+        let result = Cli::try_parse_from(["cargo-chronoscope", "diff", "1"]);
         assert!(result.is_err());
     }
 

@@ -1,4 +1,4 @@
-//! cargo-chrono — Cargo build performance observer.
+//! cargo-chronoscope — Cargo build performance observer.
 //!
 //! Entry point that parses CLI arguments and dispatches to the appropriate
 //! command handler. Assembles all async tasks and manages graceful shutdown.
@@ -28,7 +28,7 @@ use crate::model::BuildId;
 use crate::persist::BuildRepository;
 
 /// Default DB directory name within the project root.
-const DB_DIR: &str = ".cargo-chrono";
+const DB_DIR: &str = ".cargo-chronoscope";
 /// Default DB file name.
 const DB_FILE: &str = "history.db";
 

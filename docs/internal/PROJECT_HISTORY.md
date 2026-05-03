@@ -1,7 +1,7 @@
 # Project History
 
 A factual record of what was built, by whom, and when. Kept in chronological
-order — most recent at the bottom. Use [`git log`](https://github.com/ymw0407/cargo-chrono/commits/main)
+order — most recent at the bottom. Use [`git log`](https://github.com/ymw0407/cargo-chronoscope/commits/main)
 for the full per-commit detail.
 
 ## Phase 1 — Skeleton (2026-04-26 → 2026-04-28)
@@ -53,15 +53,15 @@ Tracked via GitHub issues from this point forward.
 | 2026-05-03 | [#9][i9] filed: Ctrl-C builds are recorded as `FAIL` and pollute baselines | issue #9 | @ymw0407 |
 | 2026-05-03 | `persist`: `BuildRepository::delete_build` for cancelled builds | [PR #10][pr10] | @ymw0407 |
 | 2026-05-03 | `main`: discard build record when user cancels with Ctrl-C / `q` | PR #10 | @ymw0407 |
-| 2026-05-03 | [#3][i3] revisited: SQLITE_BUSY race on concurrent `cargo-chrono` processes | issue #3 | @ymw0407 |
+| 2026-05-03 | [#3][i3] revisited: SQLITE_BUSY race on concurrent `cargo-chronoscope` processes | issue #3 | @ymw0407 |
 | 2026-05-03 | `persist`: 5s `busy_timeout` on connection open | [PR #11][pr11] | @ymw0407 |
 | 2026-05-03 | `persist`: atomic migrations with `PRAGMA user_version` guard | PR #11 | @ymw0407 |
 | 2026-05-03 | Open-source release prep: MIT LICENSE, English README, planning docs moved to `docs/internal/` | this PR | @ymw0407 |
 
-[i3]: https://github.com/ymw0407/cargo-chrono/issues/3
-[i9]: https://github.com/ymw0407/cargo-chrono/issues/9
-[pr10]: https://github.com/ymw0407/cargo-chrono/pull/10
-[pr11]: https://github.com/ymw0407/cargo-chrono/pull/11
+[i3]: https://github.com/ymw0407/cargo-chronoscope/issues/3
+[i9]: https://github.com/ymw0407/cargo-chronoscope/issues/9
+[pr10]: https://github.com/ymw0407/cargo-chronoscope/pull/10
+[pr11]: https://github.com/ymw0407/cargo-chronoscope/pull/11
 
 ## Status snapshot at release prep
 

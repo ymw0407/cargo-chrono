@@ -1,13 +1,13 @@
 # Contributing Guide
 
-cargo-chrono에 기여해주셔서 감사합니다.
+cargo-chronoscope에 기여해주셔서 감사합니다.
 
 ## 개발 환경 설정
 
 ```bash
 # 저장소 클론
 git clone <repo-url>
-cd cargo-chrono
+cd cargo-chronoscope
 
 # 빌드 확인
 cargo check

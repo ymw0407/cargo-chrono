@@ -1,6 +1,6 @@
 # 동시성 & Race Condition 분석
 
-cargo-chrono는 5개의 async task가 동시에 동작하는 파이프라인이다.
+cargo-chronoscope는 5개의 async task가 동시에 동작하는 파이프라인이다.
 이 문서는 **예상되는 race condition과 대응 전략**을 모듈/구현자별로 정리한다.
 구현 전에 이 문서를 읽고, 구현 후에는 체크리스트의 각 항목이 처리됐는지 확인한다.
 
@@ -40,7 +40,7 @@ Watch:   Supervisor ──▶ Parser ──▶ Broker ─┬──▶ Persister 
 - cargo stdout pipe의 OS 버퍼(보통 64KB)가 차면 cargo의 write syscall도 블록
 - **cargo 빌드가 실제로 멈춘다**
 
-**증상**: "빌드가 진행 중인데 cargo-chrono가 멈춘 것처럼 보임"
+**증상**: "빌드가 진행 중인데 cargo-chronoscope가 멈춘 것처럼 보임"
 
 **대응**:
 - Parser는 절대 blocking I/O를 하지 않는다. JSON 파싱만 담당(CPU-only).
@@ -75,7 +75,7 @@ let _ = self.child.kill(); // 이미 종료된 경우 에러 무시
 
 **시나리오**:
 - 터미널 포그라운드의 프로세스 그룹 전체에 SIGINT 전달
-- cargo-chrono와 자식 cargo 모두 SIGINT 수신
+- cargo-chronoscope와 자식 cargo 모두 SIGINT 수신
 - cargo가 먼저 죽으면서 stdout 버퍼의 마지막 JSON 라인이 잘릴 수 있음
 - Parser가 불완전한 JSON에 대해 에러 뱉고 종료
 
@@ -355,7 +355,7 @@ println!("Build {} recorded.", persister_result);
 **불변식**:
 - `run_tui`는 반환 전에 반드시 raw mode를 복원해야 한다.
 - `run_persister`는 반환 시 항상 마지막 `finalize_build`를 호출한 상태여야 한다 (성공/실패 무관).
-- `cargo` 프로세스는 cargo-chrono보다 먼저 종료돼야 한다 (좀비 방지).
+- `cargo` 프로세스는 cargo-chronoscope보다 먼저 종료돼야 한다 (좀비 방지).
 
 ---
 

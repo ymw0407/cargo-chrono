@@ -1,12 +1,12 @@
-# cargo-chrono 설계 문서
+# cargo-chronoscope 설계 문서
 
 ## 1. 프로젝트 개요
 
-`cargo-chrono`는 Rust의 빌드 도구 Cargo가 생성하는 빌드 이벤트 스트림을 수집·저장·분석하여
+`cargo-chronoscope`는 Rust의 빌드 도구 Cargo가 생성하는 빌드 이벤트 스트림을 수집·저장·분석하여
 빌드 성능을 관측하는 CLI 도구이다.
 
 Cargo는 `--message-format=json` 플래그를 통해 빌드 과정의 모든 이벤트를 JSON 스트림으로
-내보낸다. cargo-chrono는 이 스트림을 파싱하여 로컬 SQLite 데이터베이스에 기록하고,
+내보낸다. cargo-chronoscope는 이 스트림을 파싱하여 로컬 SQLite 데이터베이스에 기록하고,
 과거 빌드와의 비교(diff) 및 실시간 모니터링(watch) 기능을 제공한다.
 
 ## 2. 문제 정의
@@ -49,16 +49,16 @@ Cargo의 JSON 출력을 파싱하여 내부 `BuildEvent` enum으로 변환한다
 ```
 # 1. main 브랜치에서 빌드 기록
 $ git checkout main
-$ cargo-chrono record -- --release
+$ cargo-chronoscope record -- --release
   ✓ Build #41 recorded (32.4s, 187 crates)
 
 # 2. feature 브랜치에서 빌드 기록
 $ git checkout feat/add-telemetry
-$ cargo-chrono record -- --release
+$ cargo-chronoscope record -- --release
   ✓ Build #42 recorded (38.1s, 193 crates)
 
 # 3. 비교
-$ cargo-chrono diff 41 42
+$ cargo-chronoscope diff 41 42
   Build #41 (main, 32.4s) → Build #42 (feat/add-telemetry, 38.1s)
   Total: +5.7s (+17.6%)
 
@@ -75,9 +75,9 @@ $ cargo-chrono diff 41 42
 ### 시나리오 2: watch — "빌드가 왜 이렇게 오래 걸리지?"
 
 ```
-$ cargo-chrono watch -- --release
+$ cargo-chronoscope watch -- --release
 
-┌─ cargo-chrono watch ─────────────────────────────────────┐
+┌─ cargo-chronoscope watch ─────────────────────────────────────┐
 │ Build #43  ▸ release  ▸ commit a1b2c3d                    │
 │ Elapsed: 0:18 / ~0:33  ████████████░░░░░░░░ 55%          │
 │                                                           │

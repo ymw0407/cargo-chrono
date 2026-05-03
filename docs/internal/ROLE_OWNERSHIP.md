@@ -43,10 +43,10 @@ Recent examples:
 - [PR #11][pr11] — `fix/data/concurrent-db-access`: pure Data work
   (busy_timeout, atomic migrations). Tracked via [issue #3][i3].
 
-[pr10]: https://github.com/ymw0407/cargo-chrono/pull/10
-[pr11]: https://github.com/ymw0407/cargo-chrono/pull/11
-[i3]: https://github.com/ymw0407/cargo-chrono/issues/3
-[i9]: https://github.com/ymw0407/cargo-chrono/issues/9
+[pr10]: https://github.com/ymw0407/cargo-chronoscope/pull/10
+[pr11]: https://github.com/ymw0407/cargo-chronoscope/pull/11
+[i3]: https://github.com/ymw0407/cargo-chronoscope/issues/3
+[i9]: https://github.com/ymw0407/cargo-chronoscope/issues/9
 
 ## Branch naming convention
 

@@ -1,4 +1,4 @@
-//! Shared domain types for cargo-chrono.
+//! Shared domain types for cargo-chronoscope.
 //!
 //! This module is owned by the Integrator and may be imported from any other module.
 //! No module in `model/` may depend on any other `src/` module.

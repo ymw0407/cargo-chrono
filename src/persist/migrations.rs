@@ -1,12 +1,12 @@
 //! Database schema migrations.
 //!
-//! Contains the SQL DDL for creating the cargo-chrono tables and indices.
+//! Contains the SQL DDL for creating the cargo-chronoscope tables and indices.
 //! Called by `SqliteRepository::open()` on first use.
 //!
 //! # Concurrency
 //!
 //! Migrations run inside a `BEGIN IMMEDIATE` transaction so a second
-//! `cargo-chrono` process opening the same DB file blocks until the first
+//! `cargo-chronoscope` process opening the same DB file blocks until the first
 //! finishes (or times out). The current `PRAGMA user_version` is checked
 //! inside the transaction; if it already matches `SCHEMA_VERSION`, the
 //! migration is a no-op. This keeps the open path safe against the race in
