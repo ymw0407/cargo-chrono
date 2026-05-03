@@ -176,6 +176,74 @@ Markers:
 - `✓` — same crate at the same critical-path position
 - `…` — unchanged crates collapsed into a count
 
+## Use as a GitHub Action
+
+The repository ships a composite GitHub Action so any Rust project can
+add build-performance tracking with one `uses:` step. Each push to your
+baseline branch records a build and updates a cached history database;
+each pull request records a build and posts (or updates in place) a
+sticky comment with the diff against the baseline.
+
+```yaml
+name: Build performance
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write          # required for sticky PR comments
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: ymw0407/cargo-chronoscope@action-v1
+        with:
+          version: '0.1.1'          # crate version pulled from crates.io
+          cargo-args: '--release'   # forwarded to `cargo build`
+          baseline-ref: 'main'
+          comment: 'true'
+```
+
+Release tags follow two namespaces:
+
+| Tag | Purpose | Example pin |
+|---|---|---|
+| `vX.Y.Z`         | Binary release on crates.io. Used by `cargo install`. | `cargo install cargo-chronoscope --version 0.1.1` |
+| `action-vN`      | Moving major tag for the GitHub Action — points at the latest backward-compatible release. | `uses: ymw0407/cargo-chronoscope@action-v1` |
+| `action-vN.M.P`  | Immutable point release for the action.              | `uses: ymw0407/cargo-chronoscope@action-v1.0.0` |
+
+Action inputs:
+
+| Input              | Default            | Description |
+|--------------------|--------------------|-------------|
+| `version`          | `0.1.1`            | crate version installed via `cargo install`. Use a concrete version for reproducibility, or `latest`. |
+| `cargo-args`       | `--release`        | Forwarded verbatim to `cargo build`. |
+| `baseline-ref`     | `main`             | Branch whose cached DB is the baseline. Only pushes to this ref update the cache. |
+| `cache-key-prefix` | `chronoscope-db`   | Prefix for the GitHub Actions cache key. |
+| `comment`          | `true`             | Post or update a sticky PR comment with the diff. |
+| `github-token`     | `${{ github.token }}` | Token used for the comment step. |
+
+Action outputs:
+
+| Output | Description |
+|---|---|
+| `build-id`     | The chronoscope build ID assigned to this run. |
+| `report-path`  | Path (relative to the workspace) of the rendered Markdown diff. |
+
+> Do **not** run `Swatinem/rust-cache` on the same job — a warm `target/`
+> directory short-circuits compilation and erases the per-crate timing
+> signal that chronoscope measures.
+
+A copy-pasteable reference workflow lives at
+[`examples/ci/build-perf.yml`](examples/ci/build-perf.yml).
+
 ## How it works
 
 ```
