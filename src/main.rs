@@ -59,11 +59,15 @@ async fn main() -> anyhow::Result<()> {
         Command::Watch { cargo_args } => {
             cmd_watch(cargo_args, workspace_dir, &db_path, cancel).await?;
         }
-        Command::Ls { last } => {
-            cmd_ls(&db_path, last).await?;
+        Command::Ls { last, format } => {
+            cmd_ls(&db_path, last, format).await?;
         }
-        Command::Diff { before, after } => {
-            cmd_diff(&db_path, before, after).await?;
+        Command::Diff {
+            before,
+            after,
+            format,
+        } => {
+            cmd_diff(&db_path, before, after, format).await?;
         }
     }
 
@@ -157,18 +161,29 @@ async fn finalize_or_discard(
 }
 
 /// List recent builds.
-async fn cmd_ls(db_path: &std::path::Path, last: usize) -> anyhow::Result<()> {
+async fn cmd_ls(db_path: &std::path::Path, last: usize, format: cli::Format) -> anyhow::Result<()> {
     let repo = persist::SqliteRepository::open(db_path).await?;
     let builds = repo.list_builds(last).await?;
-    cli::render_ls(&builds);
+    match format {
+        cli::Format::Text => cli::render_ls(&builds),
+        cli::Format::Json => cli::json::render_ls_json(&builds)?,
+    }
     Ok(())
 }
 
 /// Diff two builds.
-async fn cmd_diff(db_path: &std::path::Path, before: i64, after: i64) -> anyhow::Result<()> {
+async fn cmd_diff(
+    db_path: &std::path::Path,
+    before: i64,
+    after: i64,
+    format: cli::Format,
+) -> anyhow::Result<()> {
     let repo = persist::SqliteRepository::open(db_path).await?;
     let build_diff = diff::compute_diff(&repo, BuildId(before), BuildId(after)).await?;
-    cli::render_diff(&build_diff);
+    match format {
+        cli::Format::Text => cli::render_diff(&build_diff),
+        cli::Format::Json => cli::json::render_diff_json(&build_diff)?,
+    }
     Ok(())
 }
 

@@ -2,9 +2,26 @@
 //!
 //! Owned by the Integrator. Uses clap 4 derive macros for argument parsing.
 
-use clap::{Parser, Subcommand};
+pub mod json;
+
+use clap::{Parser, Subcommand, ValueEnum};
 
 use crate::model::{Build, BuildDiff, BuildId, CrateChange, DurationChange};
+
+/// Output format for `ls` and `diff`.
+///
+/// `Text` is the default human-readable form. `Json` emits a single-line
+/// JSON document on stdout, suitable for CI integrations and downstream
+/// tooling. The JSON schema is defined in [`json`] and is treated as a
+/// stable wire format.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, ValueEnum)]
+pub enum Format {
+    /// Human-readable table / report (default).
+    #[default]
+    Text,
+    /// Single-line JSON object on stdout.
+    Json,
+}
 
 /// cargo-chronoscope — Cargo build performance observer.
 #[derive(Parser, Debug)]
@@ -36,6 +53,9 @@ pub enum Command {
         /// Number of most recent builds to display.
         #[arg(long, default_value = "10")]
         last: usize,
+        /// Output format.
+        #[arg(long, value_enum, default_value_t = Format::Text)]
+        format: Format,
     },
 
     /// Compare two recorded builds.
@@ -44,6 +64,9 @@ pub enum Command {
         before: i64,
         /// Build ID of the "after" build.
         after: i64,
+        /// Output format.
+        #[arg(long, value_enum, default_value_t = Format::Text)]
+        format: Format,
     },
 }
 
@@ -304,7 +327,10 @@ mod tests {
     fn parse_ls_defaults_last_to_10() {
         let cli = Cli::try_parse_from(["cargo-chronoscope", "ls"]).unwrap();
         match cli.command {
-            Command::Ls { last } => assert_eq!(last, 10),
+            Command::Ls { last, format } => {
+                assert_eq!(last, 10);
+                assert_eq!(format, Format::Text);
+            }
             other => panic!("expected Ls, got {:?}", other),
         }
     }
@@ -313,9 +339,27 @@ mod tests {
     fn parse_ls_with_explicit_last() {
         let cli = Cli::try_parse_from(["cargo-chronoscope", "ls", "--last", "5"]).unwrap();
         match cli.command {
-            Command::Ls { last } => assert_eq!(last, 5),
+            Command::Ls { last, format } => {
+                assert_eq!(last, 5);
+                assert_eq!(format, Format::Text);
+            }
             _ => panic!("expected Ls"),
         }
+    }
+
+    #[test]
+    fn parse_ls_with_json_format() {
+        let cli = Cli::try_parse_from(["cargo-chronoscope", "ls", "--format", "json"]).unwrap();
+        match cli.command {
+            Command::Ls { format, .. } => assert_eq!(format, Format::Json),
+            _ => panic!("expected Ls"),
+        }
+    }
+
+    #[test]
+    fn parse_ls_rejects_unknown_format() {
+        let result = Cli::try_parse_from(["cargo-chronoscope", "ls", "--format", "yaml"]);
+        assert!(result.is_err());
     }
 
     #[test]
@@ -345,10 +389,25 @@ mod tests {
     fn parse_diff_requires_two_ids() {
         let cli = Cli::try_parse_from(["cargo-chronoscope", "diff", "3", "7"]).unwrap();
         match cli.command {
-            Command::Diff { before, after } => {
+            Command::Diff {
+                before,
+                after,
+                format,
+            } => {
                 assert_eq!(before, 3);
                 assert_eq!(after, 7);
+                assert_eq!(format, Format::Text);
             }
+            _ => panic!("expected Diff"),
+        }
+    }
+
+    #[test]
+    fn parse_diff_with_json_format() {
+        let cli = Cli::try_parse_from(["cargo-chronoscope", "diff", "1", "2", "--format", "json"])
+            .unwrap();
+        match cli.command {
+            Command::Diff { format, .. } => assert_eq!(format, Format::Json),
             _ => panic!("expected Diff"),
         }
     }
