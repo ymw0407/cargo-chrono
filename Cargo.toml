@@ -1,6 +1,6 @@
 [package]
 name = "cargo-chronoscope"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Cargo build performance observer — record, diff, and watch your Rust builds"
 license = "MIT"
