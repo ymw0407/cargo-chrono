@@ -81,6 +81,15 @@ pub trait BuildRepository: Send + Sync {
     /// Computes mean, standard deviation, min, and max from historical compilation times.
     /// Returns `None` if there is insufficient data.
     async fn fetch_baseline(&self, crate_name: &str) -> anyhow::Result<Option<Baseline>>;
+
+    /// Delete a build and all of its crate compilations.
+    ///
+    /// Used by the orchestrator to discard a build that the user interrupted
+    /// (Ctrl-C / `q`). Deleting cancelled builds keeps anomaly baselines from
+    /// being polluted by partial timing data.
+    ///
+    /// Idempotent: deleting a non-existent build is not an error.
+    async fn delete_build(&self, id: BuildId) -> anyhow::Result<()>;
 }
 
 /// Consume a `BuildEvent` stream and persist each event to the repository.
