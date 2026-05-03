@@ -30,7 +30,7 @@ anyhow = "1"
 async-trait = "0.1"
 chrono = "0.4"
 clap = { version = "4", features = ["derive"] }
-crossterm = "0.28"
+crossterm = "0.29"
 ratatui = "0.29"
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
