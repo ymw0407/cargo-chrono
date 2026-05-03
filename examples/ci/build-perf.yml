@@ -1,0 +1,44 @@
+# Example: how a downstream Rust project would adopt the cargo-chronoscope
+# composite action.
+#
+# Drop a copy of this file at .github/workflows/build-perf.yml in any Rust
+# repository. The action measures cargo build performance, caches the
+# history DB with `main` as the canonical baseline, and posts a sticky
+# diff comment on each pull request.
+#
+# Caller responsibilities:
+#   - Set up the Rust toolchain (the action does NOT do this for you, so it
+#     plays well with whatever Rust version your project pins).
+#   - Avoid using rust-cache on the same job: a warm `target/` would mask
+#     per-crate timing, which is exactly the signal chronoscope measures.
+
+name: Build performance
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: ymw0407/cargo-chronoscope@v0.1.0
+        with:
+          # Pin to a specific version for reproducibility, or use `latest`.
+          version: '0.1.0'
+          # Forwarded to `cargo build`. Default is --release; pass an empty
+          # string for a debug build.
+          cargo-args: '--release'
+          # Branch whose DB is the baseline. Only pushes to this ref will
+          # write back to the cache.
+          baseline-ref: 'main'
+          # Sticky PR comment is on by default; set to 'false' to disable.
+          comment: 'true'

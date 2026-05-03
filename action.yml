@@ -1,0 +1,176 @@
+name: 'cargo-chronoscope'
+description: >-
+  Record and diff Cargo build performance. Caches the history database
+  with the baseline branch as the canonical source, and (optionally)
+  posts a sticky PR comment summarising the change.
+author: 'ymw0407'
+
+branding:
+  icon: 'activity'
+  color: 'orange'
+
+# This action wraps the cargo-chronoscope CLI into a one-step CI flow:
+#
+#   1. Restore the most recent baseline DB from the GitHub Actions cache.
+#   2. Install cargo-chronoscope (from crates.io, with `--locked`).
+#   3. Run `cargo-chronoscope record` against the project under test.
+#   4. Render a Markdown diff (current build vs. previous build) into
+#      $GITHUB_STEP_SUMMARY, and -- on pull_request runs -- as a sticky
+#      PR comment identified by a hidden marker so it updates in place.
+#   5. Save the updated DB back to the cache, but only on baseline-branch
+#      pushes, so PR runs never overwrite the baseline.
+#
+# The action is intentionally `composite` (not Docker / JS) so it inherits
+# the calling workflow's Rust toolchain and its rust-cache state. The
+# caller is responsible for setting up Rust before invoking this action.
+
+inputs:
+  version:
+    description: >-
+      cargo-chronoscope version to install. Use a concrete version like
+      `0.1.1` for reproducibility, or `latest` to track the newest crate.
+    required: false
+    default: 'latest'
+  cargo-args:
+    description: >-
+      Arguments forwarded verbatim to `cargo build` via
+      `cargo-chronoscope record -- <args>`. Default: `--release`.
+    required: false
+    default: '--release'
+  baseline-ref:
+    description: >-
+      Branch whose chronoscope DB is the baseline. Only pushes to this
+      ref are allowed to update the cached DB.
+    required: false
+    default: 'main'
+  cache-key-prefix:
+    description: >-
+      Prefix for the GitHub Actions cache key holding the DB.
+    required: false
+    default: 'chronoscope-db'
+  comment:
+    description: >-
+      Post (or update) a sticky PR comment with the diff. `true` or
+      `false`. Forked-PR runs receive a read-only token, so posting may
+      fail silently — the workflow itself continues regardless.
+    required: false
+    default: 'true'
+  github-token:
+    description: >-
+      Token used to post PR comments. Defaults to ${{ github.token }}.
+      Only used when `comment` is `true` and the event is a pull_request.
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  build-id:
+    description: 'The build ID assigned to this run by chronoscope.'
+    value: ${{ steps.report.outputs.build-id }}
+  report-path:
+    description: 'Path (relative to the workspace) of the rendered Markdown report.'
+    value: ${{ steps.report.outputs.report-path }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Restore chronoscope history
+      uses: actions/cache/restore@v4
+      with:
+        path: .cargo-chronoscope/history.db
+        key: ${{ inputs.cache-key-prefix }}-${{ github.sha }}
+        restore-keys: |
+          ${{ inputs.cache-key-prefix }}-
+
+    - name: Install cargo-chronoscope
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        if [ "$VERSION" = "latest" ]; then
+          cargo install cargo-chronoscope --locked
+        else
+          cargo install cargo-chronoscope --version "$VERSION" --locked
+        fi
+
+    - name: Record build
+      shell: bash
+      env:
+        CARGO_ARGS: ${{ inputs.cargo-args }}
+      run: |
+        set -euo pipefail
+        # shellcheck disable=SC2086 # CARGO_ARGS is a deliberate word-split.
+        cargo-chronoscope record -- $CARGO_ARGS
+
+    - name: Render diff report
+      id: report
+      shell: bash
+      run: |
+        set -euo pipefail
+        # Pull the two most recent build IDs as integers, newest first.
+        # When --format json is available (>=0.1.1) this becomes:
+        #   ids=($(cargo-chronoscope ls --last 2 --format json | jq '.builds[].id'))
+        mapfile -t ids < <(cargo-chronoscope ls --last 2 \
+          | awk '/^#[0-9]+/ {gsub(/#/,"",$1); print $1}')
+
+        report="perf-report.md"
+        {
+          if [ "${#ids[@]}" -lt 2 ]; then
+            echo "## Build performance"
+            echo ""
+            echo "_Only one build recorded so far — nothing to diff._"
+          else
+            before="${ids[1]}"
+            after="${ids[0]}"
+            echo "## Build performance: #${before} → #${after}"
+            echo ""
+            echo '```'
+            cargo-chronoscope diff "$before" "$after"
+            echo '```'
+          fi
+        } > "$report"
+        cat "$report"
+
+        echo "report-path=$report" >> "$GITHUB_OUTPUT"
+        if [ "${#ids[@]}" -ge 1 ]; then
+          echo "build-id=${ids[0]}" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Append report to step summary
+      shell: bash
+      run: cat perf-report.md >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Post / update sticky PR comment
+      if: inputs.comment == 'true' && github.event_name == 'pull_request'
+      continue-on-error: true
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        PR: ${{ github.event.pull_request.number }}
+        REPO: ${{ github.repository }}
+      run: |
+        set -euo pipefail
+        marker='<!-- chronoscope-perf-comment -->'
+        { echo "$marker"; echo ""; cat perf-report.md; } > comment.md
+
+        existing_id=$(gh api \
+          "repos/${REPO}/issues/${PR}/comments" \
+          --paginate \
+          --jq "[.[] | select(.body | startswith(\"$marker\"))] | first | .id // empty")
+
+        if [ -n "$existing_id" ]; then
+          jq -Rs '{body: .}' comment.md \
+            | gh api "repos/${REPO}/issues/comments/${existing_id}" \
+                -X PATCH --input -
+          echo "Updated existing PR comment ${existing_id}."
+        else
+          gh pr comment "$PR" --body-file comment.md
+          echo "Created new PR comment."
+        fi
+
+    - name: Save chronoscope history
+      if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', inputs.baseline-ref)
+      uses: actions/cache/save@v4
+      with:
+        path: .cargo-chronoscope/history.db
+        key: ${{ inputs.cache-key-prefix }}-${{ github.sha }}
