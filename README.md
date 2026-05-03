@@ -2,6 +2,7 @@
 
 > Cargo build performance observer — record, diff, and watch your Rust builds.
 
+[![Crates.io](https://img.shields.io/crates/v/cargo-chronoscope.svg)](https://crates.io/crates/cargo-chronoscope)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 `cargo-chronoscope` consumes Cargo's machine-readable build event stream, persists
@@ -40,17 +41,19 @@ Other things it does:
 
 ## Installation
 
-### From source (current option)
+```bash
+cargo install cargo-chronoscope
+```
+
+This puts `cargo-chronoscope` on your `PATH` (typically `~/.cargo/bin`).
+
+### From source
 
 ```bash
 git clone https://github.com/ymw0407/cargo-chronoscope.git
 cd cargo-chronoscope
 cargo install --path .
 ```
-
-This puts `cargo-chronoscope` on your `PATH` (typically `~/.cargo/bin`).
-
-A crates.io release will follow once the API stabilises.
 
 ## Quick start
 
