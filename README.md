@@ -50,8 +50,8 @@ This puts `cargo-chronoscope` on your `PATH` (typically `~/.cargo/bin`).
 ### From source
 
 ```bash
-git clone https://github.com/ymw0407/cargo-chronoscope.git
-cd cargo-chronoscope
+git clone https://github.com/ymw0407/cargo-chrono.git
+cd cargo-chrono
 cargo install --path .
 ```
 
@@ -203,9 +203,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
 
-      - uses: ymw0407/cargo-chronoscope@action-v1
+      - uses: ymw0407/cargo-chrono@action-v1
         with:
-          version: '0.1.1'          # crate version pulled from crates.io
+          version: '0.1.4'          # crate version pulled from crates.io
           cargo-args: '--release'   # forwarded to `cargo build`
           baseline-ref: 'main'
           comment: 'true'
@@ -215,9 +215,9 @@ Release tags follow two namespaces:
 
 | Tag | Purpose | Example pin |
 |---|---|---|
-| `vX.Y.Z`         | Binary release on crates.io. Used by `cargo install`. | `cargo install cargo-chronoscope --version 0.1.1` |
-| `action-vN`      | Moving major tag for the GitHub Action — points at the latest backward-compatible release. | `uses: ymw0407/cargo-chronoscope@action-v1` |
-| `action-vN.M.P`  | Immutable point release for the action.              | `uses: ymw0407/cargo-chronoscope@action-v1.0.0` |
+| `vX.Y.Z`         | Binary release on crates.io. Used by `cargo install`. | `cargo install cargo-chronoscope --version 0.1.4` |
+| `action-vN`      | Moving major tag for the GitHub Action — points at the latest backward-compatible release. | `uses: ymw0407/cargo-chrono@action-v1` |
+| `action-vN.M.P`  | Immutable point release for the action.              | `uses: ymw0407/cargo-chrono@action-v1.0.0` |
 
 Action inputs:
 
@@ -305,12 +305,12 @@ flags and formats as the tool evolves.
 
 Known gaps:
 
-- Linux/Windows are not yet tested in CI (developed on macOS aarch64).
+- Windows is not yet tested in CI (Linux x86_64 and macOS x86_64/aarch64 are exercised by the release workflow; primary development happens on macOS aarch64).
 - `cargo --timings` integration is not yet exposed (cargo's own per-crate
   timing report could feed the same database).
 - `anomaly` thresholds are not configurable from the CLI (hardcoded to 2σ).
 
-See [issues](https://github.com/ymw0407/cargo-chronoscope/issues) for the
+See [issues](https://github.com/ymw0407/cargo-chrono/issues) for the
 prioritised list.
 
 ## Contributing
