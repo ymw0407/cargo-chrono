@@ -28,8 +28,33 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  prepare-release:
+    # Creates the GitHub Release object before the binary jobs try to
+    # attach archives to it. taiki-e/upload-rust-binary-action does NOT
+    # create releases on tag-push events — it expects one to already
+    # exist, otherwise it retries 10× then fails with "release not found".
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create or reuse the GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; reusing."
+          else
+            gh release create "$TAG" --title "$TAG" --generate-notes
+          fi
+
   publish:
     name: Publish to crates.io
+    needs: prepare-release
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -61,7 +86,7 @@ jobs:
 
   release-binaries:
     name: Build & upload (${{ matrix.target }})
-    needs: publish
+    needs: [prepare-release, publish]
     permissions:
       contents: write
     strategy:
