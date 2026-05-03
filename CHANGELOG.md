@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-05-03
+
+### Fixed
+- `cargo-chronoscope watch`: pressing any key on the post-build dashboard no longer marks the run as interrupted. The dismiss keypress was sharing the same `CancellationToken` as the Ctrl-C handler, so it routed through `finalize_or_discard`'s "interrupted" branch and deleted the freshly recorded build. Fixes [#33](https://github.com/ymw0407/cargo-chronoscope/issues/33).
+
 ## [0.1.5] - 2026-05-03
 
 ### Changed
@@ -60,7 +65,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SQLite-backed history at `<workspace>/.cargo-chronoscope/history.db`.
 - Anomaly classifier (mean ± 2σ) and ratatui dashboard.
 
-[Unreleased]: https://github.com/ymw0407/cargo-chronoscope/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/ymw0407/cargo-chronoscope/compare/v0.1.6...HEAD
+[0.1.6]: https://github.com/ymw0407/cargo-chronoscope/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/ymw0407/cargo-chronoscope/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/ymw0407/cargo-chronoscope/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/ymw0407/cargo-chronoscope/compare/v0.1.2...v0.1.3

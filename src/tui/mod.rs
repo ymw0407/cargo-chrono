@@ -36,6 +36,12 @@ use crate::tui::state::TuiState;
 /// Block in the TUI's keyboard loop until the user presses any key, or
 /// `cancel` is fired. Used after the build finishes so the final dashboard
 /// stays on screen instead of vanishing the moment the alt screen is left.
+///
+/// **Important:** this function must NOT cancel the shared `CancellationToken`
+/// on key press. The build is already finished by the time we wait here, and
+/// firing the token would route the run through `finalize_or_discard`'s
+/// "interrupted" branch, deleting the just-recorded build. The outer TUI loop
+/// already has an explicit `break` after this call, so no signal is needed.
 fn wait_for_exit_key(cancel: &CancellationToken) -> anyhow::Result<()> {
     loop {
         if cancel.is_cancelled() {
@@ -43,7 +49,6 @@ fn wait_for_exit_key(cancel: &CancellationToken) -> anyhow::Result<()> {
         }
         if crossterm::event::poll(Duration::from_millis(100))? {
             if let Event::Key(_) = crossterm::event::read()? {
-                cancel.cancel();
                 return Ok(());
             }
         }
