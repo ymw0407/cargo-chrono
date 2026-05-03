@@ -1,6 +1,6 @@
 # `docs/internal/` — historical and team-internal documents
 
-These documents come from the planning phase of `cargo-chrono` (April–May 2026)
+These documents come from the planning phase of `cargo-chronoscope` (April–May 2026)
 and from the post-completion record. They are checked in for context but are
 **not user-facing documentation** — for that, see the top-level
 [`README.md`](../../README.md).

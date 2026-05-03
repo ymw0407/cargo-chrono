@@ -1,4 +1,4 @@
-//! Core identifier types used throughout cargo-chrono.
+//! Core identifier types used throughout cargo-chronoscope.
 
 use std::fmt;
 

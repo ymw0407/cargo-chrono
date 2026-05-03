@@ -1,10 +1,10 @@
-# cargo-chrono
+# cargo-chronoscope
 
 > Cargo build performance observer — record, diff, and watch your Rust builds.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-`cargo-chrono` consumes Cargo's machine-readable build event stream, persists
+`cargo-chronoscope` consumes Cargo's machine-readable build event stream, persists
 each build to a local SQLite database, and gives you four ways to look at the
 results: a real-time TUI dashboard while a build is running, a list of past
 builds, a diff between any two builds, and a baseline-aware anomaly classifier
@@ -20,10 +20,10 @@ analyses historical trends.
 
 | Command | What it does |
 |---|---|
-| `cargo-chrono record [-- <cargo args>]` | Run a `cargo build`, record every compilation event to the local database. |
-| `cargo-chrono watch [-- <cargo args>]`  | Same as `record`, plus a live ratatui dashboard showing active crates, anomaly verdicts, and CPU/memory. |
-| `cargo-chrono ls [--last N]`            | List the most recent builds (default: 10). |
-| `cargo-chrono diff <before> <after>`    | Compare two recorded builds: total time, per-crate movers, and side-by-side critical paths. |
+| `cargo-chronoscope record [-- <cargo args>]` | Run a `cargo build`, record every compilation event to the local database. |
+| `cargo-chronoscope watch [-- <cargo args>]`  | Same as `record`, plus a live ratatui dashboard showing active crates, anomaly verdicts, and CPU/memory. |
+| `cargo-chronoscope ls [--last N]`            | List the most recent builds (default: 10). |
+| `cargo-chronoscope diff <before> <after>`    | Compare two recorded builds: total time, per-crate movers, and side-by-side critical paths. |
 
 Other things it does:
 
@@ -34,7 +34,7 @@ Other things it does:
 - **Cancellation-aware recording** — pressing `q` or `Ctrl-C` mid-build
   discards the partial data instead of polluting your baselines with a
   half-recorded build.
-- **Concurrent-safe storage** — multiple `cargo-chrono` processes can share
+- **Concurrent-safe storage** — multiple `cargo-chronoscope` processes can share
   the same database; SQLite's `busy_timeout` and a transactional migration
   serialise the few moments where it matters.
 
@@ -43,12 +43,12 @@ Other things it does:
 ### From source (current option)
 
 ```bash
-git clone https://github.com/ymw0407/cargo-chrono.git
-cd cargo-chrono
+git clone https://github.com/ymw0407/cargo-chronoscope.git
+cd cargo-chronoscope
 cargo install --path .
 ```
 
-This puts `cargo-chrono` on your `PATH` (typically `~/.cargo/bin`).
+This puts `cargo-chronoscope` on your `PATH` (typically `~/.cargo/bin`).
 
 A crates.io release will follow once the API stabilises.
 
@@ -60,22 +60,22 @@ cd ~/your-rust-project
 
 # Watch a build live.
 cargo clean
-cargo-chrono watch
+cargo-chronoscope watch
 
 # Or record without a UI, then inspect later.
 cargo clean
-cargo-chrono record
+cargo-chronoscope record
 
-cargo-chrono ls
-cargo-chrono diff 1 2
+cargo-chronoscope ls
+cargo-chronoscope diff 1 2
 ```
 
-`cargo-chrono` runs `cargo build` in the current directory and stores its
-data in `./.cargo-chrono/history.db` (SQLite, WAL mode). Add this directory
+`cargo-chronoscope` runs `cargo build` in the current directory and stores its
+data in `./.cargo-chronoscope/history.db` (SQLite, WAL mode). Add this directory
 to your `.gitignore`:
 
 ```gitignore
-.cargo-chrono/
+.cargo-chronoscope/
 ```
 
 ## Usage
@@ -83,9 +83,9 @@ to your `.gitignore`:
 ### `record` — store a build for later analysis
 
 ```bash
-cargo-chrono record                   # cargo build
-cargo-chrono record -- --release      # cargo build --release
-cargo-chrono record -- -p my_crate    # cargo build -p my_crate
+cargo-chronoscope record                   # cargo build
+cargo-chronoscope record -- --release      # cargo build --release
+cargo-chronoscope record -- -p my_crate    # cargo build -p my_crate
 ```
 
 Anything after `--` is forwarded verbatim to `cargo build`. On success it
@@ -95,12 +95,12 @@ get `Build interrupted — not recorded.` instead.
 ### `watch` — record + live TUI dashboard
 
 ```bash
-cargo-chrono watch
-cargo-chrono watch -- --release
+cargo-chronoscope watch
+cargo-chronoscope watch -- --release
 ```
 
 ```
-┌─ cargo-chrono ───────────────────────────────────────┐
+┌─ cargo-chronoscope ───────────────────────────────────────┐
 │ Build #5 (release) • commit abc1234 • elapsed 0:28   │
 │ 142 crates compiled                                  │
 ├─ Active compilations ────────────────────────────────┤
@@ -125,8 +125,8 @@ cache hit.
 ### `ls` — list builds
 
 ```bash
-cargo-chrono ls
-cargo-chrono ls --last 30
+cargo-chronoscope ls
+cargo-chronoscope ls --last 30
 ```
 
 ```
@@ -140,7 +140,7 @@ ID     Started              Profile  Duration   Status
 ### `diff` — compare two builds
 
 ```bash
-cargo-chrono diff 1 2
+cargo-chronoscope diff 1 2
 ```
 
 ```
@@ -208,7 +208,7 @@ Markers:
 
 ## Database schema
 
-A single SQLite file at `<workspace>/.cargo-chrono/history.db`:
+A single SQLite file at `<workspace>/.cargo-chronoscope/history.db`:
 
 ```
 builds
@@ -224,7 +224,7 @@ WAL mode is enabled. `crate_compilations.build_id` references `builds.id`
 (no `ON DELETE CASCADE` — `delete_build` removes both rows in one
 transaction).
 
-You can query the database directly with `sqlite3 .cargo-chrono/history.db`
+You can query the database directly with `sqlite3 .cargo-chronoscope/history.db`
 if you want.
 
 ## Status
@@ -239,7 +239,7 @@ Known gaps:
   timing report could feed the same database).
 - `anomaly` thresholds are not configurable from the CLI (hardcoded to 2σ).
 
-See [issues](https://github.com/ymw0407/cargo-chrono/issues) for the
+See [issues](https://github.com/ymw0407/cargo-chronoscope/issues) for the
 prioritised list.
 
 ## Contributing

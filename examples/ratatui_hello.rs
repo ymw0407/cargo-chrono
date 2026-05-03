@@ -28,7 +28,7 @@ fn main() -> io::Result<()> {
         terminal.draw(|frame| {
             let area = frame.area();
 
-            let greeting = Paragraph::new("Hello, cargo-chrono! Press 'q' to quit.")
+            let greeting = Paragraph::new("Hello, cargo-chronoscope! Press 'q' to quit.")
                 .alignment(Alignment::Center)
                 .block(
                     Block::default()

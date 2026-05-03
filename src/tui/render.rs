@@ -6,7 +6,7 @@
 //!
 //! Layout (top to bottom):
 //! ```text
-//! ┌─ cargo-chrono ────────────────────────────────────────────┐
+//! ┌─ cargo-chronoscope ────────────────────────────────────────────┐
 //! │ Build #N (release)  •  commit abc1234  •  elapsed 0:28   │
 //! │ 142 crates compiled                                        │
 //! ├─ Active compilations ─────────────────────────────────────┤
@@ -110,7 +110,7 @@ fn render_header(frame: &mut Frame, area: Rect, state: &TuiState) {
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(" cargo-chrono ");
+        .title(" cargo-chronoscope ");
 
     frame.render_widget(Paragraph::new(text).block(block), area);
 }

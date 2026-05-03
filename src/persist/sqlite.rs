@@ -27,7 +27,7 @@ impl SqliteRepository {
     /// Open (or create) a SQLite database at the given path.
     ///
     /// - Sets a 5s `busy_timeout` so writer-lock contention from another
-    ///   `cargo-chrono` process retries automatically instead of failing
+    ///   `cargo-chronoscope` process retries automatically instead of failing
     ///   with `SQLITE_BUSY`.
     /// - Enables WAL journal mode for better concurrent read performance.
     /// - Runs any pending schema migrations atomically (see

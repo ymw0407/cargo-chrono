@@ -1,10 +1,10 @@
-# CLAUDE.md — cargo-chrono
+# CLAUDE.md — cargo-chronoscope
 
 이 파일은 AI 코딩 어시스턴트(Claude Code 등)가 이 프로젝트에서 작업할 때 따라야 할 규칙과 컨텍스트입니다.
 
 ## 프로젝트 개요
 
-cargo-chrono는 Rust의 Cargo 빌드 이벤트 스트림을 수집·저장·분석하는 CLI 도구입니다.
+cargo-chronoscope는 Rust의 Cargo 빌드 이벤트 스트림을 수집·저장·분석하는 CLI 도구입니다.
 4개 명령(record, watch, ls, diff)을 제공하며, 3인 팀이 모듈별로 분리 개발합니다.
 
 ## 빌드 & 검증 명령
@@ -89,7 +89,7 @@ Supervisor → Parser → Broker ─┬→ Persister → DB
 - `CompilationFinished`에는 `duration`, `started_at`, `finished_at`가 항상 포함
 
 ### DB 위치
-`<project_root>/.cargo-chrono/history.db` (SQLite, WAL mode)
+`<project_root>/.cargo-chronoscope/history.db` (SQLite, WAL mode)
 
 ### BuildId 발급
 Persister가 `BuildStarted` 이벤트를 받을 때 DB INSERT → AUTOINCREMENT로 발급

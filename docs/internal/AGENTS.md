@@ -26,7 +26,7 @@ cargo fmt --check && cargo clippy -- -D warnings && cargo test
 ### 프롬프트 템플릿
 
 ```
-나는 cargo-chrono 프로젝트의 [역할] 담당이다.
+나는 cargo-chronoscope 프로젝트의 [역할] 담당이다.
 CLAUDE.md와 AGENTS.md를 먼저 읽고 프로젝트 규칙을 따라라.
 
 [작업 내용]
