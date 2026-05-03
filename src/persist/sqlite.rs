@@ -26,20 +26,27 @@ pub struct SqliteRepository {
 impl SqliteRepository {
     /// Open (or create) a SQLite database at the given path.
     ///
-    /// Enables WAL journal mode for better concurrent read performance
-    /// and runs any pending schema migrations.
+    /// - Sets a 5s `busy_timeout` so writer-lock contention from another
+    ///   `cargo-chrono` process retries automatically instead of failing
+    ///   with `SQLITE_BUSY`.
+    /// - Enables WAL journal mode for better concurrent read performance.
+    /// - Runs any pending schema migrations atomically (see
+    ///   [`migrations::run_migrations`]).
     ///
     /// # Errors
     ///
     /// Returns an error if the database cannot be opened or if migrations fail.
     pub async fn open(path: &Path) -> anyhow::Result<Self> {
-        let conn = Connection::open(path)?;
+        let mut conn = Connection::open(path)?;
+
+        // Block (rather than instantly failing) on writer-lock contention.
+        conn.busy_timeout(Duration::from_secs(5))?;
 
         // Enable WAL mode for better concurrent read performance.
         conn.pragma_update(None, "journal_mode", "wal")?;
 
-        // Run schema migrations.
-        migrations::run_migrations(&conn)?;
+        // Run schema migrations atomically (handles concurrent openers).
+        migrations::run_migrations(&mut conn)?;
 
         Ok(Self {
             conn: Mutex::new(conn),
@@ -284,6 +291,60 @@ mod tests {
             name: name.to_string(),
             version: None,
         }
+    }
+
+    /// Two separate SqliteRepository handles on the same DB file must be able
+    /// to open and write concurrently without surfacing SQLITE_BUSY. Reproduces
+    /// the open-time race documented in issue #3.
+    #[tokio::test]
+    async fn concurrent_open_and_write_from_two_tasks() {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("concurrent.db");
+        let p1 = db_path.clone();
+        let p2 = db_path.clone();
+
+        let writer = |path: std::path::PathBuf, label: &'static str| async move {
+            let repo = SqliteRepository::open(&path).await.unwrap();
+            for i in 0..10 {
+                let id = repo
+                    .begin_build(
+                        &format!("2025-01-01T00:00:{:02}Z", i),
+                        None,
+                        "[]",
+                        &BuildProfile::Dev,
+                    )
+                    .await
+                    .unwrap_or_else(|e| panic!("{label} begin_build failed: {e}"));
+                repo.record_compilation(
+                    id,
+                    &lib_crate(label),
+                    "lib",
+                    "2025-01-01T00:00:00Z",
+                    "2025-01-01T00:00:01Z",
+                    Duration::from_millis(100),
+                )
+                .await
+                .unwrap_or_else(|e| panic!("{label} record_compilation failed: {e}"));
+                repo.finalize_build(id, "2025-01-01T00:00:01Z", true, Duration::from_secs(1))
+                    .await
+                    .unwrap_or_else(|e| panic!("{label} finalize_build failed: {e}"));
+            }
+        };
+
+        let h1 = tokio::spawn(writer(p1, "task-a"));
+        let h2 = tokio::spawn(writer(p2, "task-b"));
+        h1.await.unwrap();
+        h2.await.unwrap();
+
+        // Final repo to verify the DB is intact.
+        let repo = SqliteRepository::open(&db_path).await.unwrap();
+        let builds = repo.list_builds(100).await.unwrap();
+        assert_eq!(
+            builds.len(),
+            20,
+            "expected 10 + 10 builds, got {}",
+            builds.len()
+        );
     }
 
     #[tokio::test]
