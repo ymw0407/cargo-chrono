@@ -1,0 +1,77 @@
+name: Build performance
+
+# Records this repo's own `cargo build` with cargo-chronoscope and diffs it
+# against the previous run. The history database is cached across runs, with
+# main acting as the canonical baseline:
+#   - every run restores the most recent main DB
+#   - only `push` to main writes back to the cache
+# The diff output is appended to the workflow step summary so it shows up on
+# the run page (and on PRs via the Checks tab).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  measure:
+    name: Record & diff
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Deliberately no rust-cache here: a warm target/ directory makes most
+      # crates compile in ~0s, which masks the per-crate timing signal we
+      # actually want to measure.
+
+      - name: Restore chronoscope history
+        uses: actions/cache/restore@v4
+        with:
+          path: .cargo-chronoscope/history.db
+          key: chronoscope-db-${{ github.sha }}
+          restore-keys: |
+            chronoscope-db-
+
+      - name: Install cargo-chronoscope
+        run: cargo install cargo-chronoscope --locked
+
+      - name: Record build
+        run: cargo-chronoscope record -- --release
+
+      - name: Show recent builds
+        run: cargo-chronoscope ls --last 5
+
+      - name: Diff against previous build
+        run: |
+          set -euo pipefail
+          mapfile -t ids < <(cargo-chronoscope ls --last 2 \
+            | awk '/^#[0-9]+/ {gsub(/#/,"",$1); print $1}')
+          if [ "${#ids[@]}" -lt 2 ]; then
+            echo "Only one build recorded so far — nothing to diff." \
+              | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          before="${ids[1]}"
+          after="${ids[0]}"
+          {
+            echo "## Build performance: #${before} → #${after}"
+            echo ""
+            echo '```'
+            cargo-chronoscope diff "$before" "$after"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Save chronoscope history
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v4
+        with:
+          path: .cargo-chronoscope/history.db
+          key: chronoscope-db-${{ github.sha }}
