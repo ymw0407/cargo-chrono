@@ -1,0 +1,121 @@
+name: Build performance
+
+# Records this repo's own `cargo build` with cargo-chronoscope and diffs it
+# against the previous run. The history database is cached across runs, with
+# main acting as the canonical baseline:
+#   - every run restores the most recent main DB
+#   - only `push` to main writes back to the cache
+# The diff is appended to the workflow step summary, and on pull_request runs
+# it is also posted as a sticky comment on the PR (idempotently updated).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  measure:
+    name: Record & diff
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Required to post / edit PR comments. Forked-PR tokens are still
+      # read-only regardless of this block, so the comment step uses
+      # continue-on-error to avoid failing the run when posting is denied.
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Deliberately no rust-cache here: a warm target/ directory makes most
+      # crates compile in ~0s, which masks the per-crate timing signal we
+      # actually want to measure.
+
+      - name: Restore chronoscope history
+        uses: actions/cache/restore@v4
+        with:
+          path: .cargo-chronoscope/history.db
+          key: chronoscope-db-${{ github.sha }}
+          restore-keys: |
+            chronoscope-db-
+
+      - name: Install cargo-chronoscope (from this repo's source)
+        # Build the binary from the checked-out source rather than crates.io so
+        # CI exercises the version under review. `--locked` honours Cargo.lock.
+        run: cargo install --path . --locked
+
+      - name: Record build
+        run: cargo-chronoscope record -- --release
+
+      - name: Show recent builds
+        run: cargo-chronoscope ls --last 5
+
+      - name: Render performance report
+        # Writes the diff (or a "nothing to diff" notice for the first build)
+        # to perf-report.md. The next two steps consume that file: one appends
+        # to the workflow summary, the other posts a PR comment.
+        run: |
+          set -euo pipefail
+          mapfile -t ids < <(cargo-chronoscope ls --last 2 \
+            | awk '/^#[0-9]+/ {gsub(/#/,"",$1); print $1}')
+          {
+            if [ "${#ids[@]}" -lt 2 ]; then
+              echo "## Build performance"
+              echo ""
+              echo "_Only one build recorded so far — nothing to diff._"
+            else
+              before="${ids[1]}"
+              after="${ids[0]}"
+              echo "## Build performance: #${before} → #${after}"
+              echo ""
+              echo '```'
+              cargo-chronoscope diff "$before" "$after"
+              echo '```'
+            fi
+          } > perf-report.md
+          cat perf-report.md
+
+      - name: Append report to step summary
+        run: cat perf-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Post / update PR comment
+        # Sticky comment: find the previous bot comment by hidden marker and
+        # PATCH it; otherwise create a new one. Forked-PR runs only have a
+        # read-only token, hence continue-on-error.
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          marker='<!-- chronoscope-perf-comment -->'
+          { echo "$marker"; echo ""; cat perf-report.md; } > comment.md
+
+          existing_id=$(gh api \
+            "repos/${REPO}/issues/${PR}/comments" \
+            --paginate \
+            --jq "[.[] | select(.body | startswith(\"$marker\"))] | first | .id // empty")
+
+          if [ -n "$existing_id" ]; then
+            jq -Rs '{body: .}' comment.md \
+              | gh api "repos/${REPO}/issues/comments/${existing_id}" \
+                  -X PATCH --input -
+            echo "Updated existing PR comment ${existing_id}."
+          else
+            gh pr comment "$PR" --body-file comment.md
+            echo "Created new PR comment."
+          fi
+
+      - name: Save chronoscope history
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v4
+        with:
+          path: .cargo-chronoscope/history.db
+          key: chronoscope-db-${{ github.sha }}
