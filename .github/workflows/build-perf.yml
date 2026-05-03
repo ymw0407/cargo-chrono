@@ -40,8 +40,10 @@ jobs:
           restore-keys: |
             chronoscope-db-
 
-      - name: Install cargo-chronoscope
-        run: cargo install cargo-chronoscope --locked
+      - name: Install cargo-chronoscope (from this repo's source)
+        # Build the binary from the checked-out source rather than crates.io so
+        # CI exercises the version under review. `--locked` honours Cargo.lock.
+        run: cargo install --path . --locked
 
       - name: Record build
         run: cargo-chronoscope record -- --release
