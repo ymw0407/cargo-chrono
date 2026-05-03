@@ -116,6 +116,17 @@ impl BuildRepository for SqliteRepository {
         Ok(())
     }
 
+    async fn delete_build(&self, id: BuildId) -> anyhow::Result<()> {
+        let mut conn = self.conn.lock().await;
+        // Atomic: drop the build's crate_compilations and the build row in
+        // one transaction so we never end up with orphaned rows.
+        let tx = conn.transaction()?;
+        tx.execute("DELETE FROM crate_compilations WHERE build_id = ?1", [id.0])?;
+        tx.execute("DELETE FROM builds WHERE id = ?1", [id.0])?;
+        tx.commit()?;
+        Ok(())
+    }
+
     async fn list_builds(&self, limit: usize) -> anyhow::Result<Vec<Build>> {
         let conn = self.conn.lock().await;
 
@@ -401,6 +412,42 @@ mod tests {
         let (_d, repo) = fresh_repo().await;
         let builds = repo.list_builds(10).await.unwrap();
         assert!(builds.is_empty());
+    }
+
+    #[tokio::test]
+    async fn delete_build_removes_build_and_compilations() {
+        let (_d, repo) = fresh_repo().await;
+        let id = repo
+            .begin_build("2025-01-01T00:00:00Z", None, "[]", &BuildProfile::Dev)
+            .await
+            .unwrap();
+        repo.record_compilation(
+            id,
+            &lib_crate("foo"),
+            "lib",
+            "2025-01-01T00:00:00Z",
+            "2025-01-01T00:00:01Z",
+            Duration::from_millis(100),
+        )
+        .await
+        .unwrap();
+        repo.finalize_build(id, "2025-01-01T00:00:01Z", true, Duration::from_secs(1))
+            .await
+            .unwrap();
+
+        repo.delete_build(id).await.unwrap();
+
+        // Build is gone.
+        assert!(repo.fetch_build(id).await.unwrap().is_none());
+        // Baseline can no longer find the deleted compilation.
+        assert!(repo.fetch_baseline("foo").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn delete_build_is_idempotent_on_missing_id() {
+        let (_d, repo) = fresh_repo().await;
+        // Deleting a never-inserted id must not error.
+        repo.delete_build(BuildId(9999)).await.unwrap();
     }
 
     #[tokio::test]
