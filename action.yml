@@ -27,10 +27,12 @@ branding:
 inputs:
   version:
     description: >-
-      cargo-chronoscope version to install. Use a concrete version like
-      `0.1.1` for reproducibility, or `latest` to track the newest crate.
+      cargo-chronoscope version to install. Pinning a concrete version
+      (e.g. `0.1.1`) gives reproducible runs; `latest` always pulls the
+      newest published crate. Defaults to the oldest version that
+      supports the `--format json` parsing path used internally.
     required: false
-    default: 'latest'
+    default: '0.1.1'
   cargo-args:
     description: >-
       Arguments forwarded verbatim to `cargo build` via
@@ -108,10 +110,10 @@ runs:
       run: |
         set -euo pipefail
         # Pull the two most recent build IDs as integers, newest first.
-        # When --format json is available (>=0.1.1) this becomes:
-        #   ids=($(cargo-chronoscope ls --last 2 --format json | jq '.builds[].id'))
-        mapfile -t ids < <(cargo-chronoscope ls --last 2 \
-          | awk '/^#[0-9]+/ {gsub(/#/,"",$1); print $1}')
+        # `ls --format json` returns `{"builds":[{"id": N, ...}, ...]}` with
+        # newest first, so jq's array index gives us [newest, previous].
+        mapfile -t ids < <(cargo-chronoscope ls --last 2 --format json \
+          | jq -r '.builds[].id')
 
         report="perf-report.md"
         {

@@ -30,10 +30,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
 
-      - uses: ymw0407/cargo-chronoscope@v0.1.0
+      - uses: ymw0407/cargo-chronoscope@v0.1.1
         with:
-          # Pin to a specific version for reproducibility, or use `latest`.
-          version: '0.1.0'
+          # cargo-chronoscope binary version pulled from crates.io. Pin a
+          # concrete version for reproducibility, or use `latest`.
+          version: '0.1.1'
           # Forwarded to `cargo build`. Default is --release; pass an empty
           # string for a debug build.
           cargo-args: '--release'
