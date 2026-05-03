@@ -97,9 +97,9 @@ runs:
       run: |
         set -euo pipefail
         if [ "$VERSION" = "latest" ]; then
-          cargo binstall --no-confirm cargo-chronoscope
+          cargo binstall --no-confirm --locked cargo-chronoscope
         else
-          cargo binstall --no-confirm --version "$VERSION" cargo-chronoscope
+          cargo binstall --no-confirm --locked --version "$VERSION" cargo-chronoscope
         fi
 
     - name: Record build
