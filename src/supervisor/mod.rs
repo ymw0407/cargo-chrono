@@ -1,13 +1,19 @@
 //! Cargo process supervisor.
 //!
 //! Spawns `cargo build --message-format=json-render-diagnostics` as a child process
-//! and streams its stdout line-by-line through a bounded channel.
+//! and streams **both** its stdout (JSON) and stderr (`Compiling foo v0.1.0`
+//! progress lines) line-by-line through a single bounded channel.
+//!
+//! Merging the two streams keeps the parser interface as a single
+//! `Receiver<String>`. Cargo's stderr is plain text and stdout is JSON-per-line,
+//! so the parser can disambiguate cheaply (JSON lines start with `{`).
 //!
 //! # Contract
 //!
-//! - `spawn_build()` returns a `Receiver<String>` that yields one JSON line per message.
+//! - `spawn_build()` returns a `Receiver<String>` that yields one line per
+//!   message — stdout and stderr lines may interleave.
 //! - The channel is bounded (capacity 1024).
-//! - When the cargo process exits, the sender is dropped and the receiver drains remaining lines.
+//! - The channel closes only after **both** stdout and stderr reach EOF.
 //! - `SupervisorHandle::cancel()` kills the child process.
 //! - `SupervisorHandle::wait()` waits for the child to exit and returns its `ExitStatus`.
 
@@ -65,27 +71,28 @@ async fn spawn_program(
 ) -> anyhow::Result<(mpsc::Receiver<String>, SupervisorHandle)> {
     // ── Spawn the child process ─────────────────────────────────────
     // `tokio::process::Command` is the async wrapper around `std::process::Command`.
-    //   stdout(Stdio::piped()) — pipe the child's stdout so we can read it.
-    //   stderr(Stdio::null())  — drop cargo's "Compiling ..." progress messages,
-    //                            which we don't need. Switch to `piped` if you
-    //                            want to surface them later.
+    //   stdout(Stdio::piped()) — pipe the child's stdout (JSON messages).
+    //   stderr(Stdio::piped()) — pipe the child's stderr (cargo's
+    //                            "Compiling foo v0.1.0" progress lines, which
+    //                            the parser uses as compilation-start anchors).
     //   kill_on_drop(true)     — automatically SIGKILL the child if the `Child`
     //                            handle is dropped. Defence in depth.
     let mut child = Command::new(program)
         .args(&args)
         .current_dir(&workspace_dir)
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .kill_on_drop(true)
         .spawn()?;
 
-    // `child.stdout` is `Option<ChildStdout>`. Take it out and wrap it in a reader.
-    // `None` would mean the `piped()` setting above didn't apply, which would be
-    // a programming error rather than a normal runtime condition.
     let stdout = child
         .stdout
         .take()
         .ok_or_else(|| anyhow::anyhow!("child stdout was not piped"))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| anyhow::anyhow!("child stderr was not piped"))?;
 
     // ── Output channel ─────────────────────────────────────────────
     // One line == one message. Capacity 1024 — when the buffer fills up, the
@@ -95,44 +102,15 @@ async fn spawn_program(
 
     // ── Cancellation token ─────────────────────────────────────────
     // When `SupervisorHandle::cancel()` is called, this token fires and the
-    // reader task exits its loop. The child process itself is killed
+    // reader tasks exit their loops. The child process itself is killed
     // separately via `start_kill()` (see `SupervisorHandle::cancel`).
     let cancel = CancellationToken::new();
-    let cancel_for_reader = cancel.clone();
 
-    // ── stdout reader task ─────────────────────────────────────────
-    // Wrap the pipe in a `BufReader` and use `lines()` to read line by line.
-    //
-    // The loop terminates on any of four conditions:
-    //   1) cancel token fires            → break immediately
-    //   2) lines.next_line() = Ok(None)  → EOF (child closed stdout)
-    //   3) lines.next_line() = Err(_)    → IO error (rare)
-    //   4) tx.send().await = Err         → receiver was dropped (consumer left)
-    tokio::spawn(async move {
-        let mut lines = BufReader::new(stdout).lines();
-        loop {
-            tokio::select! {
-                // `biased` polls cancel first every iteration — guarantees
-                // prompt shutdown rather than fairness.
-                biased;
-                _ = cancel_for_reader.cancelled() => break,
-                next = lines.next_line() => {
-                    match next {
-                        Ok(Some(line)) => {
-                            if tx.send(line).await.is_err() {
-                                // Consumer dropped the receiver — no point continuing.
-                                break;
-                            }
-                        }
-                        Ok(None) => break, // EOF
-                        Err(_) => break,   // IO error
-                    }
-                }
-            }
-        }
-        // When this task ends `tx` is dropped, the channel closes, and the
-        // consumer's next `recv()` returns None.
-    });
+    // ── Reader tasks ───────────────────────────────────────────────
+    // Two readers, one per pipe, share `tx` (via clone). The mpsc channel
+    // closes only when *both* tx clones are dropped, i.e. when both EOF.
+    spawn_line_reader(stdout, tx.clone(), cancel.clone());
+    spawn_line_reader(stderr, tx, cancel.clone());
 
     let handle = SupervisorHandle {
         child: Mutex::new(Some(child)),
@@ -140,6 +118,34 @@ async fn spawn_program(
     };
 
     Ok((rx, handle))
+}
+
+/// Spawn a task that reads `pipe` line by line and forwards each line to `tx`,
+/// stopping on cancel, EOF, IO error, or receiver drop.
+fn spawn_line_reader<R>(pipe: R, tx: mpsc::Sender<String>, cancel: CancellationToken)
+where
+    R: tokio::io::AsyncRead + Unpin + Send + 'static,
+{
+    tokio::spawn(async move {
+        let mut lines = BufReader::new(pipe).lines();
+        loop {
+            tokio::select! {
+                biased;
+                _ = cancel.cancelled() => break,
+                next = lines.next_line() => {
+                    match next {
+                        Ok(Some(line)) => {
+                            if tx.send(line).await.is_err() {
+                                break;
+                            }
+                        }
+                        Ok(None) => break,
+                        Err(_) => break,
+                    }
+                }
+            }
+        }
+    });
 }
 
 /// Handle for a running cargo build process.
