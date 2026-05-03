@@ -1,22 +1,31 @@
-//! Cargo JSON output parser.
+//! Cargo output parser.
 //!
-//! Transforms raw JSON lines from `cargo build --message-format=json-render-diagnostics`
-//! into a typed `BuildEvent` stream.
+//! Transforms raw lines from `cargo build --message-format=json-render-diagnostics`
+//! (both stdout JSON and stderr progress text, merged by the supervisor) into a
+//! typed `BuildEvent` stream.
 //!
 //! # Contract
 //!
 //! - The first event emitted is always `BuildStarted`.
 //! - The last event emitted is always `BuildFinished`.
-//! - `CompilationFinished` events always contain a valid `duration`, `started_at`,
-//!   and `finished_at`. The Parser internally matches `CompilationStarted` /
-//!   `CompilationFinished` pairs to compute durations.
+//! - Each `CompilationFinished` is preceded by a `CompilationStarted` for the
+//!   same `CrateId`. When cargo's `Compiling foo v0.1.0` stderr line is seen,
+//!   `CompilationStarted` is emitted at that moment and the start `Instant`
+//!   stashed; the matching `compiler-artifact` JSON later yields a
+//!   `CompilationFinished` with the real elapsed duration.
+//! - When no `Compiling` line is seen for a target (e.g. the second target of
+//!   a multi-target package, or a workspace member compiled before stderr was
+//!   attached), the parser falls back to emitting a synthetic
+//!   `CompilationStarted`+`CompilationFinished` pair with `duration = 0`.
 //! - The output channel is bounded (capacity 1024).
 //! - Unknown JSON messages are silently ignored (forward compatibility).
 //!
 //! # Implementation notes
 //!
 //! - Uses `serde_json` for direct parsing (no `cargo_metadata` crate).
-//! - Maintains an internal `HashMap<CrateId, Instant>` to match start/finish pairs.
+//! - Maintains an internal `HashMap<CrateId, (Instant, String)>` to match
+//!   `Compiling` stderr lines with the corresponding `compiler-artifact`
+//!   stdout JSON.
 
 use std::collections::HashMap;
 use std::time::Instant;
@@ -80,9 +89,29 @@ pub async fn run_parser(
         // build-finished state — defaults to "didn't see one" = treat as failure.
         let mut build_success = false;
 
-        // (2) Process each incoming JSON line.
+        // (2) Process each incoming line. Lines from cargo's stdout are JSON;
+        // lines from stderr are plain text (we care about "Compiling foo v0.1.0").
         while let Some(line) = rx.recv().await {
-            // Malformed JSON: skip silently (forward compatibility).
+            // Stderr "Compiling X vY" → record start time and emit Started.
+            if let Some((name, version)) = parse_compiling_line(&line) {
+                let crate_id = CrateId {
+                    name,
+                    version: Some(version),
+                };
+                let now = Instant::now();
+                let now_iso = iso_now();
+                in_progress.insert(crate_id.clone(), (now, now_iso.clone()));
+                let _ = tx
+                    .send(BuildEvent::CompilationStarted {
+                        crate_id,
+                        kind: CrateKind::Unknown, // real kind known only at artifact time
+                        at: now_iso,
+                    })
+                    .await;
+                continue;
+            }
+
+            // Otherwise expect JSON on stdout. Malformed → skip.
             let json: Value = match serde_json::from_str(&line) {
                 Ok(v) => v,
                 Err(_) => continue,
@@ -103,31 +132,49 @@ pub async fn run_parser(
                     let now = Instant::now();
                     let now_iso = iso_now();
 
-                    // Get start time. If we never saw this crate before, "started" = now.
-                    let (started_instant, started_iso) = in_progress
-                        .remove(&crate_id)
-                        .unwrap_or_else(|| (now, now_iso.clone()));
+                    // We match `in_progress` on crate name only because cargo's
+                    // "Compiling" line uses the package name while artifacts
+                    // use the target name (which often equals the package name
+                    // for libs but may differ for bins/examples).
+                    let matching_key = in_progress
+                        .keys()
+                        .find(|k| k.name == crate_id.name)
+                        .cloned();
 
-                    let duration = now.saturating_duration_since(started_instant);
-
-                    // Emit synthetic CompilationStarted, then CompilationFinished.
-                    let _ = tx
-                        .send(BuildEvent::CompilationStarted {
-                            crate_id: crate_id.clone(),
-                            kind: kind.clone(),
-                            at: started_iso.clone(),
-                        })
-                        .await;
-
-                    let _ = tx
-                        .send(BuildEvent::CompilationFinished {
-                            crate_id,
-                            kind,
-                            started_at: started_iso,
-                            finished_at: now_iso,
-                            duration,
-                        })
-                        .await;
+                    if let Some(key) = matching_key {
+                        let (started_instant, started_iso) = in_progress.remove(&key).unwrap();
+                        let duration = now.saturating_duration_since(started_instant);
+                        // Emit only Finished — Started was already emitted when
+                        // we saw the "Compiling" line.
+                        let _ = tx
+                            .send(BuildEvent::CompilationFinished {
+                                crate_id,
+                                kind,
+                                started_at: started_iso,
+                                finished_at: now_iso,
+                                duration,
+                            })
+                            .await;
+                    } else {
+                        // No "Compiling" line seen — fall back to a synthetic
+                        // 0-duration pair so the contract holds.
+                        let _ = tx
+                            .send(BuildEvent::CompilationStarted {
+                                crate_id: crate_id.clone(),
+                                kind: kind.clone(),
+                                at: now_iso.clone(),
+                            })
+                            .await;
+                        let _ = tx
+                            .send(BuildEvent::CompilationFinished {
+                                crate_id,
+                                kind,
+                                started_at: now_iso.clone(),
+                                finished_at: now_iso,
+                                duration: std::time::Duration::ZERO,
+                            })
+                            .await;
+                    }
                 }
 
                 "compiler-message" => {
@@ -190,6 +237,23 @@ pub async fn run_parser(
 /// Current UTC timestamp formatted as RFC 3339 (an ISO 8601 subset).
 fn iso_now() -> String {
     Utc::now().to_rfc3339()
+}
+
+/// Parse a cargo stderr progress line of the form `   Compiling foo v0.1.0`.
+///
+/// Returns `(name, version)` if the line matches, `None` otherwise.
+/// Trailing path suffix like `(/tmp/foo)` is ignored. Lines starting with
+/// other verbs (`Checking`, `Finished`, `Building`, etc.) yield `None`.
+fn parse_compiling_line(line: &str) -> Option<(String, String)> {
+    let rest = line.trim_start().strip_prefix("Compiling")?;
+    let rest = rest.trim_start();
+    let (name, after_name) = rest.split_once(char::is_whitespace)?;
+    let version = after_name.trim_start().strip_prefix('v')?;
+    let version = version.split_whitespace().next()?;
+    if name.is_empty() || version.is_empty() {
+        return None;
+    }
+    Some((name.to_string(), version.to_string()))
 }
 
 /// Extract `(CrateId, CrateKind)` from a cargo `compiler-artifact` JSON object.
@@ -433,6 +497,133 @@ mod tests {
     }
 
     // ---- helper unit tests ------------------------------------------------
+
+    // ---- parse_compiling_line tests --------------------------------------
+
+    #[test]
+    fn parse_compiling_basic() {
+        assert_eq!(
+            parse_compiling_line("   Compiling proc-macro2 v1.0.106"),
+            Some(("proc-macro2".to_string(), "1.0.106".to_string()))
+        );
+    }
+
+    #[test]
+    fn parse_compiling_with_path_suffix() {
+        assert_eq!(
+            parse_compiling_line("   Compiling demo v0.1.0 (/tmp/demo)"),
+            Some(("demo".to_string(), "0.1.0".to_string()))
+        );
+    }
+
+    #[test]
+    fn parse_compiling_with_complex_version() {
+        assert_eq!(
+            parse_compiling_line("   Compiling wasi v0.14.7+wasi-0.2.4"),
+            Some(("wasi".to_string(), "0.14.7+wasi-0.2.4".to_string()))
+        );
+    }
+
+    #[test]
+    fn parse_compiling_no_indent() {
+        assert_eq!(
+            parse_compiling_line("Compiling foo v1.2.3"),
+            Some(("foo".to_string(), "1.2.3".to_string()))
+        );
+    }
+
+    #[test]
+    fn parse_compiling_rejects_other_verbs() {
+        assert_eq!(parse_compiling_line("    Checking foo v0.1.0"), None);
+        assert_eq!(parse_compiling_line("    Finished `dev` profile"), None);
+        assert_eq!(parse_compiling_line("    Building [...]"), None);
+    }
+
+    #[test]
+    fn parse_compiling_rejects_missing_version() {
+        assert_eq!(parse_compiling_line("   Compiling foo"), None);
+        assert_eq!(parse_compiling_line("   Compiling foo bar"), None);
+    }
+
+    #[test]
+    fn parse_compiling_rejects_json() {
+        // JSON lines from stdout must never match.
+        assert_eq!(
+            parse_compiling_line(r#"{"reason":"compiler-artifact","target":{"name":"foo"}}"#),
+            None
+        );
+    }
+
+    // ---- end-to-end timing test ------------------------------------------
+
+    #[tokio::test]
+    async fn compiling_line_anchors_real_duration() {
+        // Feed: Compiling line, sleep 50ms, then artifact. The resulting
+        // CompilationFinished should have a non-zero duration that's at
+        // least 30ms (with slack for CI jitter).
+        let (tx, rx) = mpsc::channel(1024);
+        let parser_rx = run_parser(rx, default_config()).await.unwrap();
+
+        tx.send("   Compiling demo v0.1.0".to_string())
+            .await
+            .unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        tx.send(
+            r#"{"reason":"compiler-artifact","package_id":"demo 0.1.0 (path+file:///tmp/demo)","target":{"kind":["lib"],"name":"demo"}}"#
+                .to_string(),
+        )
+        .await
+        .unwrap();
+        tx.send(r#"{"reason":"build-finished","success":true}"#.to_string())
+            .await
+            .unwrap();
+        drop(tx);
+
+        let mut parser_rx = parser_rx;
+        let mut events = Vec::new();
+        while let Some(e) = parser_rx.recv().await {
+            events.push(e);
+        }
+
+        let finished = events
+            .iter()
+            .find_map(|e| match e {
+                BuildEvent::CompilationFinished {
+                    crate_id, duration, ..
+                } if crate_id.name == "demo" => Some(*duration),
+                _ => None,
+            })
+            .expect("expected CompilationFinished for demo");
+
+        assert!(
+            finished >= std::time::Duration::from_millis(30),
+            "expected duration ≥ 30ms (real timing), got {:?}",
+            finished
+        );
+    }
+
+    #[tokio::test]
+    async fn artifact_without_compiling_line_falls_back_to_zero() {
+        let events = collect_events(vec![
+            r#"{"reason":"compiler-artifact","package_id":"orphan 0.1.0 (path+file:///tmp/orphan)","target":{"kind":["lib"],"name":"orphan"}}"#,
+            r#"{"reason":"build-finished","success":true}"#,
+        ])
+        .await;
+
+        // Contract: every Finished still has a matching Started.
+        let started_count = events
+            .iter()
+            .filter(|e| matches!(e, BuildEvent::CompilationStarted { .. }))
+            .count();
+        let finished_count = events
+            .iter()
+            .filter(|e| matches!(e, BuildEvent::CompilationFinished { .. }))
+            .count();
+        assert_eq!(started_count, finished_count);
+        assert_eq!(finished_count, 1);
+    }
+
+    // ---- existing helper tests -------------------------------------------
 
     #[test]
     fn extract_version_old_format() {

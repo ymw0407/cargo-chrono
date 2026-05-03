@@ -90,9 +90,6 @@ pub fn render_ls(builds: &[Build]) {
 /// Unchanged crates are summarised as a single count), and the head of each
 /// critical path. Use `--verbose` (future) to see Unchanged entries.
 pub fn render_diff(diff: &BuildDiff) {
-    /// How many leading nodes of the critical path to show before truncating.
-    const CRITICAL_PATH_HEAD: usize = 15;
-
     println!("Build {} → Build {}", diff.before, diff.after);
     render_duration_change("Total", &diff.total_change);
     println!();
@@ -154,38 +151,134 @@ pub fn render_diff(diff: &BuildDiff) {
     }
 
     println!();
-    print_critical_path(
-        "Critical path (before)",
-        &diff.critical_path_before,
-        CRITICAL_PATH_HEAD,
-    );
-    print_critical_path(
-        "Critical path (after) ",
-        &diff.critical_path_after,
-        CRITICAL_PATH_HEAD,
-    );
+    print_critical_path_diff(&diff.critical_path_before, &diff.critical_path_after);
 }
 
-fn print_critical_path(label: &str, path: &[String], head: usize) {
-    if path.is_empty() {
-        println!("{}: (empty)", label);
+/// Print a side-by-side comparison of the two critical paths.
+///
+/// The full path is always printed — it is the load-bearing metric for build
+/// performance (longest dependency chain), and the actual bottleneck may sit
+/// deep in the path. Pipe to `less` if the output is long.
+///
+/// Layout:
+/// ```text
+/// Critical path: 14 → 11 nodes (-3)
+///
+///    #   before              after
+///   ─── ─────────────────── ───────────────────
+///    1  cfg_if              memchr
+///    2  equivalent          bytes
+///    ...
+///    5  foldhash            foldhash             ✓ same position
+///    ...
+///   12  version_check       —
+///
+///   removed: scopeguard, version_check, ryu
+///   added:   (none)
+/// ```
+fn print_critical_path_diff(before: &[String], after: &[String]) {
+    let len_b = before.len();
+    let len_a = after.len();
+    let delta = len_a as i64 - len_b as i64;
+    let delta_str = match delta.cmp(&0) {
+        std::cmp::Ordering::Greater => format!(" (+{})", delta),
+        std::cmp::Ordering::Less => format!(" ({})", delta),
+        std::cmp::Ordering::Equal => String::new(),
+    };
+    println!("Critical path: {} → {} nodes{}", len_b, len_a, delta_str);
+
+    if len_b == 0 && len_a == 0 {
+        println!("  (empty)");
         return;
     }
-    let total = path.len();
-    let shown: Vec<&String> = path.iter().take(head).collect();
-    print!(
-        "{}: {}",
-        label,
-        shown
-            .iter()
-            .map(|s| s.as_str())
-            .collect::<Vec<_>>()
-            .join(" → ")
-    );
-    if total > head {
-        print!(" → … (+{} more)", total - head);
-    }
+
+    let max_len = len_b.max(len_a);
+
+    // Column width = longest name across the full path, capped at 28 to keep
+    // total under ~80 cols.
+    let col_width = before
+        .iter()
+        .chain(after.iter())
+        .map(|s| s.chars().count())
+        .max()
+        .unwrap_or(20)
+        .clamp(6, 28);
+
+    // Index column width grows with the path length so 100+ nodes still align.
+    let idx_width = max_len.to_string().len().max(3);
+
     println!();
+    println!(
+        "  {:>idx$}  {:<width$}  {:<width$}",
+        "#",
+        "before",
+        "after",
+        idx = idx_width,
+        width = col_width,
+    );
+    println!(
+        "  {}  {}  {}",
+        "─".repeat(idx_width),
+        "─".repeat(col_width),
+        "─".repeat(col_width),
+    );
+
+    for i in 0..max_len {
+        let b = before.get(i).map(|s| s.as_str()).unwrap_or("—");
+        let a = after.get(i).map(|s| s.as_str()).unwrap_or("—");
+        let marker = if before.get(i).is_some() && before.get(i) == after.get(i) {
+            "  ✓"
+        } else {
+            ""
+        };
+        println!(
+            "  {:>idx$}  {:<width$}  {:<width$}{}",
+            i + 1,
+            truncate(b, col_width),
+            truncate(a, col_width),
+            marker,
+            idx = idx_width,
+            width = col_width,
+        );
+    }
+
+    // Set diff: which crate names are unique to each path.
+    let before_set: std::collections::HashSet<&str> = before.iter().map(|s| s.as_str()).collect();
+    let after_set: std::collections::HashSet<&str> = after.iter().map(|s| s.as_str()).collect();
+    let removed: Vec<&str> = before
+        .iter()
+        .map(|s| s.as_str())
+        .filter(|s| !after_set.contains(s))
+        .collect();
+    let added: Vec<&str> = after
+        .iter()
+        .map(|s| s.as_str())
+        .filter(|s| !before_set.contains(s))
+        .collect();
+
+    println!();
+    if !removed.is_empty() {
+        println!("  removed from path: {}", removed.join(", "));
+    }
+    if !added.is_empty() {
+        println!("  added to path:     {}", added.join(", "));
+    }
+    if removed.is_empty() && added.is_empty() && len_b > 0 && len_a > 0 {
+        println!("  same crate set, possibly reordered");
+    }
+}
+
+fn truncate(s: &str, width: usize) -> String {
+    let count = s.chars().count();
+    if count <= width {
+        s.to_string()
+    } else if width <= 1 {
+        "…".to_string()
+    } else {
+        let mut out: String = s.chars().take(width - 1).collect();
+        out.push('…');
+        out
+    }
 }
 
 fn render_duration_change(label: &str, change: &DurationChange) {
