@@ -297,6 +297,7 @@ transaction).
 
 You can query the database directly with `sqlite3 .cargo-chronoscope/history.db`
 if you want.
+
 ## Status
 
 This project is under active development.
@@ -307,19 +308,20 @@ Current release CI builds and tests prebuilt binaries for:
 - macOS (x86_64-apple-darwin)
 - macOS (aarch64-apple-darwin)
 
-Windows support is currently untested.
-
-The release workflow automatically generates binaries on each tagged release.
-Latest builds and artifacts can be found in the GitHub Releases section.
+Windows support is currently untested. See the
+[release workflow](.github/workflows/release.yml) and the
+[Releases page](https://github.com/ymw0407/cargo-chronoscope/releases) for
+the latest builds and artifacts.
 
 Known gaps:
 
-- Windows is not yet validated in CI
-- Some experimental CLI features may change between releases
-- Performance analysis modules are still evolving
+- Windows is not yet validated in CI.
+- `cargo --timings` integration is not yet exposed (cargo's own per-crate
+  timing report could feed the same database).
+- `anomaly` thresholds are not configurable from the CLI (hardcoded to 2σ).
 
-See [issues](https://github.com/ymw0407/cargo-chronoscope/issues) for planned improvements.
-
+See [issues](https://github.com/ymw0407/cargo-chronoscope/issues) for the
+prioritised list.
 
 ## Contributing
 
