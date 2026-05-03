@@ -9,6 +9,13 @@ repository = "https://github.com/ymw0407/cargo-chronoscope"
 homepage = "https://github.com/ymw0407/cargo-chronoscope"
 keywords = ["cargo", "build", "performance", "profiling"]
 categories = ["development-tools::profiling", "command-line-utilities"]
+include = [
+    "/src/**/*",
+    "/examples/**/*",
+    "/Cargo.toml",
+    "/README.md",
+    "/LICENSE",
+]
 
 [[bin]]
 name = "cargo-chronoscope"
