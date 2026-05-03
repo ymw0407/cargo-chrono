@@ -42,3 +42,17 @@ tokio-util = { version = "0.7", features = ["rt"] }
 
 [dev-dependencies]
 tempfile = "3"
+
+# cargo-binstall metadata.
+#
+# Tells `cargo binstall` where the prebuilt archives published by the
+# `release-binaries` job in .github/workflows/release.yml live. The URL
+# template resolves at install time:
+#   - {repo}    → repository URL
+#   - {version} → crate version
+#   - {target}  → host triple (e.g. x86_64-unknown-linux-gnu)
+# Each archive contains the `cargo-chronoscope` binary at its root.
+[package.metadata.binstall]
+pkg-url = "{repo}/releases/download/v{version}/{name}-{target}.tar.gz"
+bin-dir = "{bin}{binary-ext}"
+pkg-fmt = "tgz"
