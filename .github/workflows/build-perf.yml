@@ -28,7 +28,7 @@ jobs:
       # continue-on-error to avoid failing the run when posting is denied.
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -50,7 +50,7 @@ jobs:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
       - name: Restore chronoscope history
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: .cargo-chronoscope/history.db
           key: chronoscope-db-${{ github.sha }}
@@ -135,7 +135,7 @@ jobs:
 
       - name: Save chronoscope history
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: .cargo-chronoscope/history.db
           key: chronoscope-db-${{ github.sha }}
