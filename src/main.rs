@@ -75,7 +75,7 @@ async fn cmd_record(
     cargo_args: Vec<String>,
     workspace_dir: PathBuf,
     db_path: &std::path::Path,
-    _cancel: CancellationToken,
+    cancel: CancellationToken,
 ) -> anyhow::Result<()> {
     let commit_hash = read_git_head();
     let profile = infer_profile(&cargo_args);
@@ -91,10 +91,8 @@ async fn cmd_record(
     };
     let event_rx = parser::run_parser(line_rx, config).await?;
 
-    let build_id = persist::run_persister(repo, event_rx).await?;
-    println!("Build {} recorded.", build_id);
-
-    Ok(())
+    let build_id = persist::run_persister(repo.clone(), event_rx).await?;
+    finalize_or_discard(repo, build_id, &cancel).await
 }
 
 /// Watch a build: Supervisor → Parser → Broker → (Persister + TUI) fan-out.
@@ -130,12 +128,31 @@ async fn cmd_watch(
     let (broker_result, persister_result, tui_result) = tokio::try_join!(
         event_broker.publish_loop(event_rx, cancel.clone()),
         persist::run_persister(repo_clone, persister_rx),
-        tui::run_tui(tui_rx, repo, cancel_clone),
+        tui::run_tui(tui_rx, repo.clone(), cancel_clone),
     )?;
 
     let _ = (broker_result, tui_result);
-    println!("Build {} recorded.", persister_result);
+    finalize_or_discard(repo, persister_result, &cancel).await
+}
 
+/// Either announce the recorded build, or — if the user cancelled — delete the
+/// partial DB rows so they don't pollute baselines and clutter `chrono ls`.
+///
+/// "Cancelled" is detected via the shared `CancellationToken`, which is fired
+/// by the Ctrl-C signal handler in `main()` and by the TUI on `q` / Ctrl-C.
+/// Real cargo failures (compile errors that exit non-zero on their own) keep
+/// the build record so the user can still inspect what happened.
+async fn finalize_or_discard(
+    repo: Arc<dyn BuildRepository>,
+    build_id: BuildId,
+    cancel: &CancellationToken,
+) -> anyhow::Result<()> {
+    if cancel.is_cancelled() {
+        repo.delete_build(build_id).await?;
+        eprintln!("Build interrupted — not recorded.");
+    } else {
+        println!("Build {} recorded.", build_id);
+    }
     Ok(())
 }
 
