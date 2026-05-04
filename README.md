@@ -17,6 +17,8 @@ analyses historical trends.
 
 [rust-goal]: https://rust-lang.github.io/rust-project-goals/2025h2/cargo-build-analysis.html
 
+![cargo-chronoscope demo: live watch dashboard, ls, diff against ripgrep](docs/assets/watch-demo.gif)
+
 ## Features
 
 | Command | What it does |
