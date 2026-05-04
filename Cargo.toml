@@ -52,7 +52,15 @@ tempfile = "3"
 #   - {version} → crate version
 #   - {target}  → host triple (e.g. x86_64-unknown-linux-gnu)
 # Each archive contains the `cargo-chronoscope` binary at its root.
+#
+# Default is the Unix `.tar.gz` archive. Windows targets get an override
+# below because taiki-e/upload-rust-binary-action packages Windows builds
+# as `.zip` (containing a `.exe`).
 [package.metadata.binstall]
 pkg-url = "{repo}/releases/download/v{version}/{name}-{target}.tar.gz"
 bin-dir = "{bin}{binary-ext}"
 pkg-fmt = "tgz"
+
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-url = "{repo}/releases/download/v{version}/{name}-{target}.zip"
+pkg-fmt = "zip"

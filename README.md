@@ -376,20 +376,27 @@ if you want.
 
 This project is under active development.
 
-Current release CI builds and tests prebuilt binaries for:
+Current release CI builds prebuilt binaries for:
 
 - Linux (x86_64-unknown-linux-gnu)
-- macOS (x86_64-apple-darwin)
+- macOS (x86_64-apple-darwin) — cross-compiled from the Apple Silicon runner
 - macOS (aarch64-apple-darwin)
+- Windows (x86_64-pc-windows-msvc)
 
-Windows support is currently untested. See the
-[release workflow](.github/workflows/release.yml) and the
-[Releases page](https://github.com/ymw0407/cargo-chronoscope/releases) for
-the latest builds and artifacts.
+`cargo binstall cargo-chronoscope` resolves the matching archive per
+host. On Windows specifically, the binstall path avoids the Smart App
+Control / WDAC blocks that source-builds (`cargo install`) hit when
+cargo's temporary build-script `.exe` files run from a sandbox-flagged
+location.
+
+See the [release workflow](.github/workflows/release.yml) and the
+[Releases page](https://github.com/ymw0407/cargo-chronoscope/releases)
+for the latest artifacts.
 
 Known gaps:
 
-- Windows is not yet validated in CI.
+- Windows is freshly added to the release matrix; first user-facing
+  `binstall` test happens at the next tagged release.
 - `cargo --timings` integration is not yet exposed (cargo's own per-crate
   timing report could feed the same database).
 - `anomaly` thresholds are not configurable from the CLI (hardcoded to 2σ).
