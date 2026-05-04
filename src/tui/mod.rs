@@ -22,8 +22,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crossterm::event::{Event, KeyCode, KeyModifiers};
-use ratatui::backend::CrosstermBackend;
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+use ratatui::backend::{Backend, CrosstermBackend};
 use ratatui::Terminal;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -43,14 +43,26 @@ use crate::tui::state::TuiState;
 /// "interrupted" branch, deleting the just-recorded build. The outer TUI loop
 /// already has an explicit `break` after this call, so no signal is needed.
 fn wait_for_exit_key(cancel: &CancellationToken) -> anyhow::Result<()> {
+    wait_for_exit_key_with(cancel, || {
+        if crossterm::event::poll(Duration::from_millis(100))? {
+            if let Event::Key(key) = crossterm::event::read()? {
+                return Ok(Some(key));
+            }
+        }
+        Ok(None)
+    })
+}
+
+fn wait_for_exit_key_with<R>(cancel: &CancellationToken, mut read_key: R) -> anyhow::Result<()>
+where
+    R: FnMut() -> anyhow::Result<Option<KeyEvent>>,
+{
     loop {
         if cancel.is_cancelled() {
             return Ok(());
         }
-        if crossterm::event::poll(Duration::from_millis(100))? {
-            if let Event::Key(_) = crossterm::event::read()? {
-                return Ok(());
-            }
+        if read_key()?.is_some() {
+            return Ok(());
         }
     }
 }
@@ -94,7 +106,7 @@ async fn cached_baseline<'a>(
 /// rendering error occurs.  Terminal cleanup still runs via the RAII guard
 /// before the error propagates.
 pub async fn run_tui(
-    mut events: mpsc::Receiver<BuildEvent>,
+    events: mpsc::Receiver<BuildEvent>,
     repo: Arc<dyn BuildRepository>,
     cancel: CancellationToken,
 ) -> anyhow::Result<()> {
@@ -124,6 +136,20 @@ pub async fn run_tui(
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
+    run_tui_loop(&mut terminal, events, repo, cancel).await
+    // _guard drops here -> disable_raw_mode + LeaveAlternateScreen (R11, R12)
+}
+
+async fn run_tui_loop<B>(
+    terminal: &mut Terminal<B>,
+    mut events: mpsc::Receiver<BuildEvent>,
+    repo: Arc<dyn BuildRepository>,
+    cancel: CancellationToken,
+) -> anyhow::Result<()>
+where
+    B: Backend,
+    B::Error: std::error::Error + Send + Sync + 'static,
+{
     let mut state = TuiState::new();
     let mut baseline_cache: HashMap<String, Option<Baseline>> = HashMap::new();
 
@@ -227,5 +253,24 @@ pub async fn run_tui(
     }
 
     Ok(())
-    // _guard drops here → disable_raw_mode + LeaveAlternateScreen (R11, R12)
+}
+
+#[cfg(test)]
+mod tests {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use tokio_util::sync::CancellationToken;
+
+    use super::wait_for_exit_key_with;
+
+    #[test]
+    fn post_build_exit_key_does_not_cancel_run() {
+        let cancel = CancellationToken::new();
+
+        wait_for_exit_key_with(&cancel, || {
+            Ok(Some(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE)))
+        })
+        .unwrap();
+
+        assert!(!cancel.is_cancelled());
+    }
 }
