@@ -24,30 +24,30 @@ cargo run --example ratatui_hello    # TUI demo
 Every PR **must** pass `cargo fmt --check && cargo clippy -- -D warnings && cargo test`
 before being submitted.
 
-## Module ownership (hard rule)
+## Architecture rules (hard)
 
-| Role | Owned modules |
-|------|---------------|
-| **Integrator** | `src/model/`, `src/cli/`, `src/supervisor/`, `src/parser/`, `src/main.rs`, `Cargo.toml` |
-| **Data** | `src/persist/`, `src/diff/` |
-| **Realtime** | `src/broker/`, `src/anomaly/`, `src/tui/` |
-
-**Do not modify code in modules you do not own.** If your change requires a
-cross-role edit, file an issue and tag the relevant owner — see
-[`docs/internal/ROLE_OWNERSHIP.md`](docs/internal/ROLE_OWNERSHIP.md).
-
-## Dependency direction (hard rule)
+These rules apply regardless of authorship. Code that violates them will be
+rejected.
 
 ```
-model/  ← every module may import; model/ must not depend on any other src/ module
-Data ↔ Realtime          not allowed in either direction
-Realtime → Data          only via the persist::BuildRepository trait
-                         (no SqliteRepository imports)
-main.rs                  the single assembly point for cross-role wiring
+model/                ← every module may import; model/ must not depend on any other src/ module
+persist/ ↔ tui/       not allowed in either direction
+(also persist/ ↔ broker/ and persist/ ↔ anomaly/, both directions)
+tui/ → persist/       only via the persist::BuildRepository trait
+                      (no SqliteRepository imports)
+main.rs               the single assembly point for cross-side wiring
 ```
 
-Code that violates these rules will be rejected. `use crate::tui` inside
-`persist/` is forbidden.
+`use crate::tui` inside `persist/` is forbidden, and vice versa.
+
+## Review routing
+
+PR reviews are routed automatically by [`.github/CODEOWNERS`](.github/CODEOWNERS) —
+do not gate changes on a "module owner" check yourself. The original
+three-person role split (Integrator / Data / Realtime) is preserved in
+[`docs/internal/ROLE_OWNERSHIP.md`](docs/internal/ROLE_OWNERSHIP.md) as
+historical context, not as an active gating rule. External contributions to
+any module are welcome.
 
 ## Code conventions
 
@@ -79,8 +79,9 @@ Code that violates these rules will be rejected. `use crate::tui` inside
 - Full rules: [`.github/COMMIT_CONVENTION.md`](.github/COMMIT_CONVENTION.md).
 
 ### Branches
-- `feat/<role>/<topic>`, `fix/<role>/<topic>`, `test/<role>/<topic>`
-- Examples: `feat/data/sqlite-crud`, `fix/realtime/tui-crash-on-exit`
+- `<type>/<topic>` — for example `feat/sqlite-crud`, `fix/tui-crash-on-exit`.
+- Legacy `<type>/<role>/<topic>` form (`feat/data/sqlite-crud`) is still
+  accepted for collaborators on the original team.
 
 ## Core architecture patterns
 
@@ -122,8 +123,8 @@ Issued by the Persister on `BuildStarted` via SQLite `AUTOINCREMENT`.
 - `rusqlite::Connection` is **not** `Sync`. Wrap it in `tokio::sync::Mutex`.
 - The TUI uses raw mode. Terminal restoration must be guaranteed even on
   panic (RAII guard + panic hook).
-- Only the Integrator role modifies `Cargo.toml`. If you need a new
-  dependency, ask the Integrator.
+- `Cargo.toml` changes (including new dependencies) require maintainer
+  review.
 
 ## Reference documents
 

@@ -1,7 +1,15 @@
-# Role Ownership
+# Role Ownership (historical)
 
-Authoritative mapping of GitHub IDs → roles → owned modules. Used to route
-issues, PR reviews, and "who do I ask about X" questions.
+> **Status:** historical. The project was originally built by a three-person
+> team and this document captured the GitHub ID → role → module mapping used
+> for review routing during initial development. Today review routing is
+> handled by [`.github/CODEOWNERS`](../../.github/CODEOWNERS) and external
+> contributions are welcome to any module. The role split below is preserved
+> for context (e.g. understanding why a given module was structured the way
+> it is) and as a reference if other maintainers from the original team
+> become active again.
+
+Original mapping of GitHub IDs → roles → owned modules.
 
 ## Roles
 
@@ -23,8 +31,8 @@ Realtime → Data       only via the BuildRepository trait (no SqliteRepository)
 main.rs               the single assembly point for cross-role wiring
 ```
 
-A PR that breaks these rules requires sign-off from the affected role
-owner(s).
+These dependency rules remain enforced regardless of authorship — see
+[`CONTRIBUTING.md`](../../CONTRIBUTING.md) for the active version.
 
 ## Cross-role coordination
 

@@ -1,0 +1,13 @@
+# Code owners — auto-routes review requests on PRs.
+# https://docs.github.com/en/repositories/managing-your-repositories-settings-and-security/customizing-your-repository/about-code-owners
+#
+# History: the project was originally built by a three-person team that split
+# ownership across Integrator (`src/model/`, `src/cli/`, `src/supervisor/`,
+# `src/parser/`, `src/main.rs`, `Cargo.toml`), Data (`src/persist/`, `src/diff/`),
+# and Realtime (`src/broker/`, `src/anomaly/`, `src/tui/`) roles. That split is
+# documented in docs/internal/ROLE_OWNERSHIP.md as historical context. Today
+# the active maintainer set has shrunk, so review routing defaults to the sole
+# active maintainer below. Add per-path entries when other maintainers become
+# active again.
+
+*       @ymw0407

@@ -8,7 +8,8 @@ report issues, propose changes, and get a pull request merged.
 - **Bugs / feature requests**: [open an issue](https://github.com/ymw0407/cargo-chronoscope/issues/new/choose)
 - **Code style & commit format**: [`.github/COMMIT_CONVENTION.md`](.github/COMMIT_CONVENTION.md)
 - **Detailed dev workflow**: [`.github/CONTRIBUTING.md`](.github/CONTRIBUTING.md)
-- **Module ownership**: [`docs/internal/ROLE_OWNERSHIP.md`](docs/internal/ROLE_OWNERSHIP.md)
+- **Review routing**: [`.github/CODEOWNERS`](.github/CODEOWNERS)
+- **Original role split (historical)**: [`docs/internal/ROLE_OWNERSHIP.md`](docs/internal/ROLE_OWNERSHIP.md)
 
 ## Reporting issues
 
@@ -28,9 +29,9 @@ For anything beyond a typo fix, **open an issue first** so we can agree on the
 approach before you spend time on a PR. Drive-by refactors that touch many
 modules are unlikely to be accepted without prior discussion.
 
-The codebase has a strict module-ownership rule (Integrator / Data / Realtime).
-If your change spans modules owned by different roles, mention this in the
-issue so the right people can review.
+External contributions are welcome to any module. Review routing is handled
+automatically by [`.github/CODEOWNERS`](.github/CODEOWNERS) — you don't need
+to figure out who owns what before opening a PR.
 
 ## Setting up your environment
 
@@ -50,9 +51,10 @@ not yet covered by CI — if you hit platform-specific issues, please file them.
 ## Pull request workflow
 
 1. Fork the repo (or create a branch if you're a collaborator).
-2. Branch name: `<type>/<role>/<topic>` — for example
-   `feat/data/sqlite-crud` or `fix/realtime/tui-crash`. See
-   [`.github/COMMIT_CONVENTION.md`](.github/COMMIT_CONVENTION.md) for the
+2. Branch name: `<type>/<topic>` — for example `fix/tui-crash-on-exit`.
+   Collaborators on the original team may also use the
+   `<type>/<role>/<topic>` form (`feat/data/sqlite-crud`); both are accepted.
+   See [`.github/COMMIT_CONVENTION.md`](.github/COMMIT_CONVENTION.md) for the
    full naming scheme.
 3. Make your change. Keep the diff focused on one logical thing.
 4. Add tests for new behaviour. We do not merge new public APIs without unit
@@ -94,25 +96,25 @@ Multi-module commits should be split. For the full rule set and examples see
   with `# Arguments`, `# Returns`, `# Errors` sections where relevant.
 - Every module file starts with a `//!` module-level doc comment.
 
-## Module ownership
+## Architecture rules
 
-The codebase splits responsibility across three roles. PRs that touch a
-module owned by a different role need explicit sign-off from that owner.
+These rules are enforced regardless of who authors the change — they keep the
+codebase from drifting into circular or leaky dependencies.
 
-| Role | Owned modules |
-|------|---------------|
-| Integrator | `src/model/`, `src/cli/`, `src/supervisor/`, `src/parser/`, `src/main.rs`, `Cargo.toml` |
-| Data | `src/persist/`, `src/diff/` |
-| Realtime | `src/broker/`, `src/anomaly/`, `src/tui/` |
-
-Dependency rules:
 - `model/` may be imported from anywhere; nothing else may be imported into
   `model/`.
-- `Data` and `Realtime` modules must **not** import each other directly.
-- `Realtime → Data` is allowed only via the `persist::BuildRepository`
-  trait — never the concrete `SqliteRepository`.
-- `main.rs` is the only place where modules from different roles are wired
+- `src/persist/` / `src/diff/` and `src/broker/` / `src/anomaly/` / `src/tui/`
+  must **not** import each other directly.
+- The TUI / broker / anomaly side may consume persistence only via the
+  `persist::BuildRepository` trait — never the concrete `SqliteRepository`.
+- `main.rs` is the only place where modules from different sides are wired
   together.
+
+The original three-role split (Integrator / Data / Realtime) that motivated
+these rules is preserved in
+[`docs/internal/ROLE_OWNERSHIP.md`](docs/internal/ROLE_OWNERSHIP.md) as
+historical context. Active review routing is in
+[`.github/CODEOWNERS`](.github/CODEOWNERS).
 
 ## Code of conduct
 

@@ -27,22 +27,21 @@ cargo fmt --check
 ## Branch strategy
 
 ```
-<type>/<role>/<topic>
+<type>/<topic>
 ```
 
 - `<type>` ∈ `feat`, `fix`, `refactor`, `test`, `docs`, `chore`, `perf`
-- `<role>` ∈ `integrator`, `data`, `realtime` — the role of the PR author,
-  not necessarily of every file touched.
 - `<topic>` — short kebab-case summary.
 
-Pure documentation changes that don't fit a single role may use
-`docs/<topic>` (for example `docs/opensource-release-prep`).
+Collaborators on the original three-person team may also use the legacy
+`<type>/<role>/<topic>` form (`feat/data/sqlite-crud`, `fix/realtime/...`).
+Both forms are accepted.
 
 Examples:
-- `feat/data/sqlite-crud`
-- `feat/realtime/broker-publish-loop`
-- `fix/integrator/supervisor-kill-signal`
+- `feat/sqlite-crud`
+- `fix/supervisor-kill-signal`
 - `docs/api-reference`
+- `feat/data/sqlite-crud` (legacy form, still accepted)
 
 ## PR checklist
 
@@ -62,33 +61,50 @@ Before opening a PR:
   [PR template](PULL_REQUEST_TEMPLATE.md).
 - [ ] Related issue is linked (`Closes #N`).
 
-## Module ownership
+## Architecture rules
 
-| Role | Owned modules | Notes |
-|------|---------------|-------|
-| **Integrator** | `src/model/`, `src/cli/`, `src/supervisor/`, `src/parser/`, `src/main.rs`, `Cargo.toml` | Owns the wire format and the assembly point. `Cargo.toml` changes (including new dependencies) must go through the Integrator. |
-| **Data** | `src/persist/`, `src/diff/` | Owns persistence and analytical comparison. The `BuildRepository` trait is the only Data API that other roles may consume. |
-| **Realtime** | `src/broker/`, `src/anomaly/`, `src/tui/` | Owns event distribution, anomaly classification, and the TUI. May read from `BuildRepository` but not import any concrete persistence type. |
+These rules are enforced regardless of authorship — they prevent the codebase
+from drifting into circular or leaky dependencies.
 
-For the authoritative GitHub-ID-to-role mapping see
-[`docs/internal/ROLE_OWNERSHIP.md`](../docs/internal/ROLE_OWNERSHIP.md).
+| Module set | Role |
+|---|---|
+| `src/model/`, `src/cli/`, `src/supervisor/`, `src/parser/`, `src/main.rs`, `Cargo.toml` | wire format, CLI, child-process plumbing, manifest |
+| `src/persist/`, `src/diff/` | persistence (SQLite) and analytical comparison; exposes the `BuildRepository` trait |
+| `src/broker/`, `src/anomaly/`, `src/tui/` | event distribution, anomaly classification, TUI |
 
-## Cross-role coordination
+Hard rules:
 
-When a fix or feature unavoidably touches another role's module:
+- `model/` may be imported from anywhere; nothing else may be imported into
+  `model/`.
+- `persist/` / `diff/` and `broker/` / `anomaly/` / `tui/` must **not** import
+  each other directly.
+- The TUI / broker / anomaly side may consume persistence only via the
+  `persist::BuildRepository` trait — never the concrete `SqliteRepository`.
+- `main.rs` is the only place where modules from different sides are wired
+  together.
+- `Cargo.toml` changes (including new dependencies) require maintainer
+  review.
 
-1. File a GitHub issue describing the change. Tag the affected role owner.
-2. Either (a) ask that owner to take the change, or (b) get explicit sign-off
-   in the issue before opening the PR.
-3. The PR title or body must call out the cross-role touch
-   (`(touches persist/)`).
+External contributions are welcome to any module. Review routing is handled
+automatically by [`.github/CODEOWNERS`](CODEOWNERS); the original
+three-person role split is preserved in
+[`docs/internal/ROLE_OWNERSHIP.md`](../docs/internal/ROLE_OWNERSHIP.md) as
+historical context.
+
+## Cross-module coordination
+
+When a fix or feature touches multiple module sets:
+
+1. File a GitHub issue describing the change.
+2. The PR title or body should call out the cross-module touch
+   (`(touches persist/)`) so reviewers notice.
 
 Recent precedents:
 - [PR #10](https://github.com/ymw0407/cargo-chronoscope/pull/10) added
-  `BuildRepository::delete_build` (Data) so the Integrator could discard
+  `BuildRepository::delete_build` so the run loop could discard
   cancelled builds. Coordinated via [issue #9](https://github.com/ymw0407/cargo-chronoscope/issues/9).
-- [PR #11](https://github.com/ymw0407/cargo-chronoscope/pull/11) was pure Data work
-  (busy_timeout, atomic migrations). Tracked via
+- [PR #11](https://github.com/ymw0407/cargo-chronoscope/pull/11) was pure
+  persistence work (busy_timeout, atomic migrations). Tracked via
   [issue #3](https://github.com/ymw0407/cargo-chronoscope/issues/3).
 
 ## Testing rules
@@ -118,7 +134,7 @@ A good review checks:
 
 - Does the change match the issue scope? Drive-by edits should be split out.
 - Are there tests for the new behaviour?
-- Does the change respect module ownership and dependency direction?
+- Does the change respect the dependency direction rules above?
 - Is documentation updated?
 - For user-facing output changes, does the PR include a sample of the new
   output?
