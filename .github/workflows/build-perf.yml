@@ -6,7 +6,10 @@ name: Build performance
 #   - every run restores the most recent main DB
 #   - only `push` to main writes back to the cache
 # The diff is appended to the workflow step summary, and on pull_request runs
-# it is also posted as a sticky comment on the PR (idempotently updated).
+# it is uploaded as an artifact for the `Build performance comment` workflow
+# (.github/workflows/perf-comment.yml) to post as a sticky comment via a
+# `workflow_run` trigger. That two-workflow split is what lets fork PRs get
+# a sticky comment despite GitHub forcing forked-PR tokens to read-only.
 
 on:
   push:
@@ -23,10 +26,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      # Required to post / edit PR comments. Forked-PR tokens are still
-      # read-only regardless of this block, so the comment step uses
-      # continue-on-error to avoid failing the run when posting is denied.
-      pull-requests: write
     steps:
       - uses: actions/checkout@v6
 
@@ -78,7 +77,8 @@ jobs:
       - name: Render performance report
         # Writes the diff (or a "nothing to diff" notice for the first build)
         # to perf-report.md. The next two steps consume that file: one appends
-        # to the workflow summary, the other posts a PR comment.
+        # to the workflow summary, and on PR runs another step uploads it as
+        # an artifact for perf-comment.yml to post.
         run: |
           set -euo pipefail
           mapfile -t ids < <(cargo-chronoscope ls --last 2 \
@@ -103,35 +103,31 @@ jobs:
       - name: Append report to step summary
         run: cat perf-report.md >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Post / update PR comment
-        # Sticky comment: find the previous bot comment by hidden marker and
-        # PATCH it; otherwise create a new one. Forked-PR runs only have a
-        # read-only token, hence continue-on-error.
+      - name: Stage perf artifact for the comment workflow
+        # On PR runs we hand perf-report.md and the PR number off to
+        # perf-comment.yml via an artifact. That sibling workflow runs in
+        # the base-repo context (workflow_run trigger), where the GitHub
+        # token has pull-requests: write even for forked-PR runs — which
+        # this workflow's token does not.
         if: github.event_name == 'pull_request'
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR: ${{ github.event.pull_request.number }}
-          REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          marker='<!-- chronoscope-perf-comment -->'
-          { echo "$marker"; echo ""; cat perf-report.md; } > comment.md
+          mkdir -p perf-artifact
+          cp perf-report.md perf-artifact/perf-report.md
+          # PR number is read by perf-comment.yml and validated as a
+          # positive integer there before being interpolated into any API
+          # call, so a tampered artifact cannot inject shell or URL fragments.
+          printf '%s\n' "${{ github.event.pull_request.number }}" \
+            > perf-artifact/pr-number.txt
 
-          existing_id=$(gh api \
-            "repos/${REPO}/issues/${PR}/comments" \
-            --paginate \
-            --jq "[.[] | select(.body | startswith(\"$marker\"))] | first | .id // empty")
-
-          if [ -n "$existing_id" ]; then
-            jq -Rs '{body: .}' comment.md \
-              | gh api "repos/${REPO}/issues/comments/${existing_id}" \
-                  -X PATCH --input -
-            echo "Updated existing PR comment ${existing_id}."
-          else
-            gh pr comment "$PR" --body-file comment.md
-            echo "Created new PR comment."
-          fi
+      - name: Upload perf artifact
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-report
+          path: perf-artifact/
+          retention-days: 7
+          if-no-files-found: error
 
       - name: Save chronoscope history
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
