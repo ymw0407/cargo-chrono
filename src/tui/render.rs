@@ -297,8 +297,6 @@ mod tests {
     fn started(name: &str) -> BuildEvent {
         BuildEvent::CompilationStarted {
             crate_id: crate_id(name),
-            kind: CrateKind::Lib,
-            at: "2025-01-01T00:00:00Z".into(),
         }
     }
 
@@ -325,7 +323,7 @@ mod tests {
     fn header_shows_build_id_when_set() {
         let mut t = make_terminal();
         let mut state = TuiState::new();
-        state.set_build_id(BuildId(42));
+        state.build_id = Some(BuildId(42));
         t.draw(|f| render_dashboard(f, &state)).unwrap();
         assert!(buf(&t).contains("#42"), "expected '#42' in buffer");
     }

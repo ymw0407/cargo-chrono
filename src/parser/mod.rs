@@ -34,7 +34,7 @@ use chrono::Utc;
 use serde_json::Value;
 use tokio::sync::mpsc;
 
-use crate::model::{BuildEvent, BuildProfile, CrateId, CrateKind, MessageLevel};
+use crate::model::{BuildEvent, BuildProfile, CrateId, CrateKind};
 
 /// Configuration for the parser.
 pub struct ParserConfig {
@@ -100,14 +100,8 @@ pub async fn run_parser(
                 };
                 let now = Instant::now();
                 let now_iso = iso_now();
-                in_progress.insert(crate_id.clone(), (now, now_iso.clone()));
-                let _ = tx
-                    .send(BuildEvent::CompilationStarted {
-                        crate_id,
-                        kind: CrateKind::Unknown, // real kind known only at artifact time
-                        at: now_iso,
-                    })
-                    .await;
+                in_progress.insert(crate_id.clone(), (now, now_iso));
+                let _ = tx.send(BuildEvent::CompilationStarted { crate_id }).await;
                 continue;
             }
 
@@ -161,8 +155,6 @@ pub async fn run_parser(
                         let _ = tx
                             .send(BuildEvent::CompilationStarted {
                                 crate_id: crate_id.clone(),
-                                kind: kind.clone(),
-                                at: now_iso.clone(),
                             })
                             .await;
                         let _ = tx
@@ -175,35 +167,6 @@ pub async fn run_parser(
                             })
                             .await;
                     }
-                }
-
-                "compiler-message" => {
-                    let crate_id = match parse_crate_id(&json) {
-                        Some(c) => c,
-                        None => continue,
-                    };
-                    let message = match json.get("message") {
-                        Some(m) => m,
-                        None => continue,
-                    };
-                    let level = match message.get("level").and_then(|l| l.as_str()) {
-                        Some("error") => MessageLevel::Error,
-                        Some("warning") => MessageLevel::Warning,
-                        _ => MessageLevel::Note,
-                    };
-                    let text = message
-                        .get("rendered")
-                        .and_then(|r| r.as_str())
-                        .unwrap_or("")
-                        .to_string();
-
-                    let _ = tx
-                        .send(BuildEvent::CompilerMessage {
-                            crate_id,
-                            level,
-                            text,
-                        })
-                        .await;
                 }
 
                 "build-finished" => {
@@ -434,22 +397,6 @@ mod tests {
             }
             other => panic!("expected CompilationFinished for 'demo', got {:?}", other),
         }
-    }
-
-    #[tokio::test]
-    async fn compiler_message_becomes_compiler_message_event() {
-        let msg = r#"{"reason":"compiler-message","package_id":"demo 0.1.0 (path+file:///tmp/demo)","manifest_path":"/tmp/demo/Cargo.toml","target":{"kind":["lib"],"crate_types":["lib"],"name":"demo","src_path":"/tmp/demo/src/lib.rs","edition":"2021","doc":true,"doctest":true,"test":true},"message":{"rendered":"warning: unused variable","children":[],"code":null,"level":"warning","message":"unused variable","spans":[]}}"#;
-        let events =
-            collect_events(vec![msg, r#"{"reason":"build-finished","success":true}"#]).await;
-
-        let has_msg = events
-            .iter()
-            .any(|e| matches!(e, BuildEvent::CompilerMessage { .. }));
-        assert!(
-            has_msg,
-            "expected a CompilerMessage event, got {:?}",
-            events
-        );
     }
 
     #[tokio::test]

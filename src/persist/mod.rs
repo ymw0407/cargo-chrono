@@ -136,8 +136,8 @@ pub async fn run_persister(
         }
     };
 
-    // Drain the rest of the stream. CompilationStarted and CompilerMessage are
-    // informational (TUI/diagnostics) and intentionally not persisted.
+    // Drain the rest of the stream. CompilationStarted is informational (only
+    // the TUI cares) and intentionally not persisted.
     while let Some(event) = rx.recv().await {
         match event {
             BuildEvent::CompilationFinished {
@@ -166,8 +166,7 @@ pub async fn run_persister(
                     .await?;
                 return Ok(build_id);
             }
-            // CompilationStarted, CompilerMessage, and any future variants:
-            // not persisted.
+            // CompilationStarted and any future variants: not persisted.
             _ => {}
         }
     }
@@ -247,8 +246,8 @@ mod tests {
 
     #[tokio::test]
     async fn ignores_non_persisted_event_kinds() {
-        // CompilationStarted and CompilerMessage are informational — they should
-        // be consumed without error and without adding database rows.
+        // CompilationStarted is informational — it should be consumed without
+        // error and without adding database rows.
         let (_d, repo) = setup().await;
         let (tx, rx) = mpsc::channel(16);
 
@@ -258,18 +257,6 @@ mod tests {
                 name: "foo".into(),
                 version: None,
             },
-            kind: CrateKind::Lib,
-            at: "2025-01-01T00:00:00Z".into(),
-        })
-        .await
-        .unwrap();
-        tx.send(BuildEvent::CompilerMessage {
-            crate_id: CrateId {
-                name: "foo".into(),
-                version: None,
-            },
-            level: crate::model::MessageLevel::Warning,
-            text: "unused variable".into(),
         })
         .await
         .unwrap();

@@ -3,10 +3,6 @@
 //! Entry point that parses CLI arguments and dispatches to the appropriate
 //! command handler. Assembles all async tasks and manages graceful shutdown.
 
-// Allow dead_code in the skeleton phase — all public APIs are intentionally
-// defined but not yet wired up. Remove this once modules are implemented.
-#![allow(dead_code)]
-
 mod anomaly;
 mod broker;
 mod cli;
