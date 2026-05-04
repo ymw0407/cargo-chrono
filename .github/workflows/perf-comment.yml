@@ -1,0 +1,80 @@
+name: Build performance comment
+
+# Posts (or updates) the sticky perf-diff comment on a pull request.
+#
+# Why a separate workflow:
+# `build-perf.yml` runs on the `pull_request` event. For PRs from forks,
+# GitHub forces the workflow's GITHUB_TOKEN to be read-only regardless of
+# the workflow's own `permissions:` block, so it cannot create or edit
+# comments. This workflow runs on `workflow_run`, which always executes
+# in the base-repo context with a token that honours `permissions:` —
+# including for fork PRs. It downloads the perf-report artifact produced
+# by the upstream run and posts/updates the sticky comment from there.
+#
+# Trust model:
+# The artifact is produced by code that may originate from a fork. We never
+# eval, source, or shell-interpret its contents; perf-report.md is read
+# verbatim into the GitHub API request body, and pr-number.txt is parsed
+# strictly as a positive integer before being interpolated anywhere.
+
+on:
+  workflow_run:
+    workflows: ["Build performance"]
+    types: [completed]
+
+jobs:
+  comment:
+    name: Post / update PR perf comment
+    runs-on: ubuntu-latest
+    # Skip pushes to main and any non-success runs. Cancelled or failed
+    # build-perf runs have nothing to report.
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success'
+    permissions:
+      pull-requests: write
+      actions: read
+    steps:
+      - name: Download perf artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: perf-report
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+          path: ./perf-artifact
+
+      - name: Read and validate PR number
+        id: pr
+        run: |
+          set -euo pipefail
+          raw=$(cat ./perf-artifact/pr-number.txt | tr -d '[:space:]')
+          if ! [[ "$raw" =~ ^[1-9][0-9]*$ ]]; then
+            echo "Refusing to use untrusted PR number from artifact: '$raw'" >&2
+            exit 1
+          fi
+          echo "number=$raw" >> "$GITHUB_OUTPUT"
+
+      - name: Post / update sticky comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ steps.pr.outputs.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          marker='<!-- chronoscope-perf-comment -->'
+          { echo "$marker"; echo ""; cat ./perf-artifact/perf-report.md; } > comment.md
+
+          existing_id=$(gh api \
+            "repos/${REPO}/issues/${PR}/comments" \
+            --paginate \
+            --jq "[.[] | select(.body | startswith(\"$marker\"))] | first | .id // empty")
+
+          if [ -n "$existing_id" ]; then
+            jq -Rs '{body: .}' comment.md \
+              | gh api "repos/${REPO}/issues/comments/${existing_id}" \
+                  -X PATCH --input -
+            echo "Updated existing PR comment ${existing_id}."
+          else
+            gh pr comment "$PR" --body-file comment.md --repo "$REPO"
+            echo "Created new PR comment."
+          fi
