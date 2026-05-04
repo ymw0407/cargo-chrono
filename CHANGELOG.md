@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-05-05
+
+### Added
+- Windows (`x86_64-pc-windows-msvc`) prebuilt binary in the release matrix, plus a `cargo-binstall` override so `cargo binstall cargo-chronoscope` resolves the `.zip` archive on Windows. This is the recommended install path on Windows because source builds via `cargo install` hit Smart App Control / WDAC blocks on cargo's temp build-script `.exe` files. ([#64](https://github.com/ymw0407/cargo-chronoscope/pull/64))
+- Forked-PR sticky perf-diff comments via a `workflow_run`-triggered companion workflow, both in this repo's CI and in the published action's example workflows. ([#59](https://github.com/ymw0407/cargo-chronoscope/pull/59))
+- README hero GIF showing the four-command flow on ripgrep. ([#62](https://github.com/ymw0407/cargo-chronoscope/pull/62))
+
+### Changed
+- macOS Intel (`x86_64-apple-darwin`) is now cross-compiled from the Apple Silicon runner because `macos-13` Intel runners are no longer reliably allocated. The `0.1.6` release silently dropped this archive; `0.1.7` restores it. ([#64](https://github.com/ymw0407/cargo-chronoscope/pull/64))
+- `CONTRIBUTING.md`, `.github/CONTRIBUTING.md`, and `CLAUDE.md` reframed the strict Integrator/Data/Realtime role-ownership rule as historical context; review routing now lives in `.github/CODEOWNERS` and external contributions to any module are explicitly welcome. ([9d4a91e](https://github.com/ymw0407/cargo-chronoscope/commit/9d4a91e))
+
+### Removed
+- The skeleton-phase `#![allow(dead_code)]` in `main.rs` and the items it was hiding: `BuildProfile::Custom`, `BuildEvent::CompilerMessage` + `MessageLevel`, `TuiState::set_build_id`, `BuildEvent::CompilationStarted.{kind, at}`, and the `kind` field on `ActiveCompilation` / `FinishedCompilation`. ([#61](https://github.com/ymw0407/cargo-chronoscope/pull/61))
+
 ## [0.1.6] - 2026-05-03
 
 ### Fixed
