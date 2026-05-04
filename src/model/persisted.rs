@@ -16,7 +16,7 @@ pub struct Build {
     pub commit_hash: Option<String>,
     /// The cargo arguments used for this build (serialized as JSON).
     pub cargo_args: String,
-    /// Build profile name ("dev", "release", "custom").
+    /// Build profile name ("dev", "release").
     pub profile: String,
     /// Whether the build succeeded. `None` if not yet finished.
     pub success: Option<bool>,
@@ -25,16 +25,14 @@ pub struct Build {
 }
 
 /// A single crate compilation record as stored in the `crate_compilations` table.
+///
+/// Only the fields actually consumed by the diff and critical-path analyses
+/// are surfaced here; the persistence layer still writes the full row to the
+/// DB (kind, started_at, finished_at, build_id) for forward compatibility but
+/// doesn't load them back into Rust today.
 #[derive(Debug, Clone)]
 pub struct CrateCompilation {
-    pub build_id: BuildId,
     pub crate_id: CrateId,
-    /// Target kind (e.g. "lib", "bin", "build-script").
-    pub kind: String,
-    /// ISO 8601 timestamp.
-    pub started_at: String,
-    /// ISO 8601 timestamp.
-    pub finished_at: String,
     /// Wall-clock compilation duration.
     pub duration: Duration,
 }
@@ -49,17 +47,11 @@ pub struct BuildDetails {
 /// Statistical baseline for a crate's compilation time, computed from historical data.
 ///
 /// Used by the anomaly detector to classify current compilations as normal/slow/fast.
+/// Only the fields the classifier actually reads are surfaced here.
 #[derive(Debug, Clone)]
 pub struct Baseline {
-    pub crate_id: CrateId,
-    /// Number of historical samples used to compute this baseline.
-    pub sample_count: u32,
     /// Mean compilation duration.
     pub mean: Duration,
     /// Standard deviation of compilation duration.
     pub std_dev: Duration,
-    /// Minimum observed compilation duration.
-    pub min: Duration,
-    /// Maximum observed compilation duration.
-    pub max: Duration,
 }

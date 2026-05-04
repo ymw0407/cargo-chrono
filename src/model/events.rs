@@ -2,7 +2,7 @@
 //!
 //! The event stream follows a strict ordering contract:
 //! 1. First event is always `BuildStarted`
-//! 2. Zero or more `CompilationStarted` / `CompilationFinished` / `CompilerMessage` events
+//! 2. Zero or more `CompilationStarted` / `CompilationFinished` events
 //! 3. Last event is always `BuildFinished`
 //!
 //! `CompilationFinished` always contains the computed `duration`
@@ -28,12 +28,7 @@ pub enum BuildEvent {
     },
 
     /// Emitted when a crate begins compiling.
-    CompilationStarted {
-        crate_id: CrateId,
-        kind: CrateKind,
-        /// Timestamp when compilation started (ISO 8601).
-        at: String,
-    },
+    CompilationStarted { crate_id: CrateId },
 
     /// Emitted when a crate finishes compiling.
     /// The Parser guarantees that `duration` is populated.
@@ -46,13 +41,6 @@ pub enum BuildEvent {
         finished_at: String,
         /// Wall-clock compilation duration.
         duration: Duration,
-    },
-
-    /// A diagnostic message from the compiler for a specific crate.
-    CompilerMessage {
-        crate_id: CrateId,
-        level: MessageLevel,
-        text: String,
     },
 
     /// Emitted once at the end of a build.
@@ -100,7 +88,6 @@ impl std::fmt::Display for CrateKind {
 pub enum BuildProfile {
     Dev,
     Release,
-    Custom,
 }
 
 impl std::fmt::Display for BuildProfile {
@@ -108,18 +95,9 @@ impl std::fmt::Display for BuildProfile {
         let s = match self {
             BuildProfile::Dev => "dev",
             BuildProfile::Release => "release",
-            BuildProfile::Custom => "custom",
         };
         write!(f, "{}", s)
     }
-}
-
-/// Severity level of a compiler diagnostic message.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum MessageLevel {
-    Warning,
-    Error,
-    Note,
 }
 
 #[cfg(test)]
@@ -142,7 +120,6 @@ mod tests {
     fn build_profile_display_strings() {
         assert_eq!(BuildProfile::Dev.to_string(), "dev");
         assert_eq!(BuildProfile::Release.to_string(), "release");
-        assert_eq!(BuildProfile::Custom.to_string(), "custom");
     }
 
     #[test]

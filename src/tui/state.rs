@@ -17,7 +17,7 @@ use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant};
 
 use crate::anomaly::AnomalyVerdict;
-use crate::model::{BuildEvent, BuildId, BuildProfile, CrateId, CrateKind};
+use crate::model::{BuildEvent, BuildId, BuildProfile, CrateId};
 use crate::tui::system_monitor::SystemSnapshot;
 
 /// Maximum number of recently-finished compilations kept in the dashboard.
@@ -28,8 +28,6 @@ const MAX_RECENT: usize = 5;
 pub struct ActiveCompilation {
     /// The crate being compiled.
     pub crate_id: CrateId,
-    /// The compilation target kind.
-    pub kind: CrateKind,
     /// Monotonic clock instant when the compilation started.
     ///
     /// Used to compute [`elapsed`](Self::elapsed) for the live timer column.
@@ -54,8 +52,6 @@ impl ActiveCompilation {
 pub struct FinishedCompilation {
     /// The crate that finished compiling.
     pub crate_id: CrateId,
-    /// The compilation target kind.
-    pub kind: CrateKind,
     /// Total wall-clock compilation duration (from the Parser).
     pub duration: Duration,
     /// Anomaly classification against historical baseline.
@@ -68,7 +64,9 @@ pub struct FinishedCompilation {
 /// All mutable state the TUI rendering pass reads from.
 #[derive(Debug)]
 pub struct TuiState {
-    /// Database-assigned build ID, set once available via [`set_build_id`](Self::set_build_id).
+    /// Database-assigned build ID. Issued by the Persister on `BuildStarted`
+    /// and not part of the event stream visible to the TUI; the run pipeline
+    /// must populate this directly if real-time display is desired.
     pub build_id: Option<BuildId>,
     /// Build profile (dev / release / custom), set on [`BuildEvent::BuildStarted`].
     pub profile: Option<BuildProfile>,
@@ -134,12 +132,11 @@ impl TuiState {
                 vec![]
             }
 
-            BuildEvent::CompilationStarted { crate_id, kind, .. } => {
+            BuildEvent::CompilationStarted { crate_id, .. } => {
                 self.active.insert(
                     crate_id.clone(),
                     ActiveCompilation {
                         crate_id: crate_id.clone(),
-                        kind: kind.clone(),
                         started_at: Instant::now(),
                         verdict: AnomalyVerdict::Unknown,
                     },
@@ -148,10 +145,7 @@ impl TuiState {
             }
 
             BuildEvent::CompilationFinished {
-                crate_id,
-                kind,
-                duration,
-                ..
+                crate_id, duration, ..
             } => {
                 self.active.remove(crate_id);
                 self.finished_count += 1;
@@ -161,7 +155,6 @@ impl TuiState {
                 }
                 self.recent.push_back(FinishedCompilation {
                     crate_id: crate_id.clone(),
-                    kind: kind.clone(),
                     duration: *duration,
                     verdict: AnomalyVerdict::Unknown,
                 });
@@ -179,8 +172,6 @@ impl TuiState {
                 self.active.clear();
                 vec![]
             }
-
-            BuildEvent::CompilerMessage { .. } => vec![],
         }
     }
 
@@ -228,19 +219,6 @@ impl TuiState {
         self.system = Some(snapshot);
     }
 
-    /// Store the database-assigned [`BuildId`].
-    ///
-    /// The ID is issued by the Persister on `BuildStarted` and is not part of
-    /// the event stream visible to the TUI.  The event loop must pass it in
-    /// via a side channel if real-time display is desired.
-    ///
-    /// # Arguments
-    ///
-    /// * `id` — The build ID assigned by [`BuildRepository::begin_build`](crate::persist::BuildRepository::begin_build).
-    pub fn set_build_id(&mut self, id: BuildId) {
-        self.build_id = Some(id);
-    }
-
     /// Returns the elapsed time since the build started, or `None` if not started.
     pub fn elapsed(&self) -> Option<Duration> {
         self.started_at.map(|t| t.elapsed())
@@ -283,8 +261,6 @@ mod tests {
     fn compilation_started(name: &str) -> BuildEvent {
         BuildEvent::CompilationStarted {
             crate_id: crate_id(name),
-            kind: CrateKind::Lib,
-            at: "2025-01-01T00:00:00Z".into(),
         }
     }
 
@@ -367,20 +343,6 @@ mod tests {
     }
 
     #[test]
-    fn compiler_message_returns_empty_vec_and_does_not_mutate() {
-        let mut s = TuiState::new();
-        let before_count = s.finished_count;
-        let finished = s.apply_event(&BuildEvent::CompilerMessage {
-            crate_id: crate_id("foo"),
-            level: crate::model::MessageLevel::Warning,
-            text: "unused var".into(),
-        });
-
-        assert!(finished.is_empty());
-        assert_eq!(s.finished_count, before_count);
-    }
-
-    #[test]
     fn recent_is_capped_at_max() {
         let mut s = TuiState::new();
         for i in 0..=MAX_RECENT {
@@ -449,9 +411,9 @@ mod tests {
     }
 
     #[test]
-    fn set_build_id_is_stored() {
+    fn build_id_field_is_writable() {
         let mut s = TuiState::new();
-        s.set_build_id(BuildId(7));
+        s.build_id = Some(BuildId(7));
         assert_eq!(s.build_id, Some(BuildId(7)));
     }
 

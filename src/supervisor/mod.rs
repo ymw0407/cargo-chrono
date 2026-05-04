@@ -17,6 +17,12 @@
 //! - `SupervisorHandle::cancel()` kills the child process.
 //! - `SupervisorHandle::wait()` waits for the child to exit and returns its `ExitStatus`.
 
+// `SupervisorHandle::cancel()`/`wait()` are intentionally exposed but not yet
+// consumed by the run pipeline — `cmd_record` and `cmd_watch` discard the
+// handle today, so Ctrl-C does not kill the cargo child. Tracked in #60; this
+// is the *only* dead-code allow in the crate. Once #60 lands, remove it.
+#![allow(dead_code)]
+
 use std::path::PathBuf;
 use std::process::{ExitStatus, Stdio};
 use std::sync::Mutex;
