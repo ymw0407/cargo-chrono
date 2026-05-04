@@ -1,15 +1,20 @@
 name: Build performance
 
 # Records this repo's own `cargo build` with cargo-chronoscope and diffs it
-# against the previous run. The history database is cached across runs, with
-# main acting as the canonical baseline:
-#   - every run restores the most recent main DB
-#   - only `push` to main writes back to the cache
-# The diff is appended to the workflow step summary, and on pull_request runs
-# it is uploaded as an artifact for the `Build performance comment` workflow
-# (.github/workflows/perf-comment.yml) to post as a sticky comment via a
-# `workflow_run` trigger. That two-workflow split is what lets fork PRs get
-# a sticky comment despite GitHub forcing forked-PR tokens to read-only.
+# against the previous run, producing the sticky perf-diff comment for
+# every PR.
+#
+# This workflow is a thin caller of the in-repo composite action
+# (`uses: ./`) so the record/diff/artifact-upload logic lives in exactly
+# one place — action.yml. The comment itself is posted by the sibling
+# perf-comment.yml on workflow_run completion, which is what makes it
+# work for forked PRs (those get a read-only token here).
+#
+# Trade-off: the chronoscope binary used to measure builds is the version
+# pinned in action.yml, installed from crates.io via cargo-binstall. PRs
+# that change the diff/report format will only show that change in CI
+# after the next crates.io release. In exchange, this workflow stays in
+# lockstep with the action that downstream users actually consume.
 
 on:
   push:
@@ -28,110 +33,13 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v6
-
       - uses: dtolnay/rust-toolchain@stable
 
-      # Cache scoped to the *install* target directory only.
-      #
-      # The chronoscope binary built from this PR's source must be cached
-      # to keep CI fast, but the workspace's own `./target/` MUST stay
-      # cold so the `record` step measures a full release build with
-      # meaningful per-crate timings. We solve this by giving the install
-      # step a separate target dir (/tmp/install-target via CARGO_TARGET_DIR
-      # below) and pointing rust-cache at that dir alone.
-      #
-      # `save-if` restricts cache writes to baseline-branch pushes so PR
-      # runs never overwrite the canonical install cache.
-      - name: Cache install artifacts
-        uses: Swatinem/rust-cache@v2
+      - uses: ./
         with:
-          workspaces: '. -> /tmp/install-target'
-          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-
-      - name: Restore chronoscope history
-        uses: actions/cache/restore@v5
-        with:
-          path: .cargo-chronoscope/history.db
-          key: chronoscope-db-${{ github.sha }}
-          restore-keys: |
-            chronoscope-db-
-
-      - name: Install cargo-chronoscope (from this repo's source)
-        # Build the binary from the checked-out source rather than crates.io
-        # so CI exercises the version under review. `--locked` honours
-        # Cargo.lock. CARGO_TARGET_DIR sends compiled artifacts to a
-        # scratch path so the workspace's ./target/ remains untouched —
-        # see the rust-cache step above for why this matters.
-        env:
-          CARGO_TARGET_DIR: /tmp/install-target
-        run: cargo install --path . --locked
-
-      - name: Record build
-        # ./target/ is empty, so this triggers a full cold release build
-        # and produces real per-crate timings for the diff.
-        run: cargo-chronoscope record -- --release
-
-      - name: Show recent builds
-        run: cargo-chronoscope ls --last 5
-
-      - name: Render performance report
-        # Writes the diff (or a "nothing to diff" notice for the first build)
-        # to perf-report.md. The next two steps consume that file: one appends
-        # to the workflow summary, and on PR runs another step uploads it as
-        # an artifact for perf-comment.yml to post.
-        run: |
-          set -euo pipefail
-          mapfile -t ids < <(cargo-chronoscope ls --last 2 \
-            | awk '/^#[0-9]+/ {gsub(/#/,"",$1); print $1}')
-          {
-            if [ "${#ids[@]}" -lt 2 ]; then
-              echo "## Build performance"
-              echo ""
-              echo "_Only one build recorded so far — nothing to diff._"
-            else
-              before="${ids[1]}"
-              after="${ids[0]}"
-              echo "## Build performance: #${before} → #${after}"
-              echo ""
-              echo '```'
-              cargo-chronoscope diff "$before" "$after"
-              echo '```'
-            fi
-          } > perf-report.md
-          cat perf-report.md
-
-      - name: Append report to step summary
-        run: cat perf-report.md >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Stage perf artifact for the comment workflow
-        # On PR runs we hand perf-report.md and the PR number off to
-        # perf-comment.yml via an artifact. That sibling workflow runs in
-        # the base-repo context (workflow_run trigger), where the GitHub
-        # token has pull-requests: write even for forked-PR runs — which
-        # this workflow's token does not.
-        if: github.event_name == 'pull_request'
-        run: |
-          set -euo pipefail
-          mkdir -p perf-artifact
-          cp perf-report.md perf-artifact/perf-report.md
-          # PR number is read by perf-comment.yml and validated as a
-          # positive integer there before being interpolated into any API
-          # call, so a tampered artifact cannot inject shell or URL fragments.
-          printf '%s\n' "${{ github.event.pull_request.number }}" \
-            > perf-artifact/pr-number.txt
-
-      - name: Upload perf artifact
-        if: github.event_name == 'pull_request'
-        uses: actions/upload-artifact@v4
-        with:
-          name: perf-report
-          path: perf-artifact/
-          retention-days: 7
-          if-no-files-found: error
-
-      - name: Save chronoscope history
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/cache/save@v5
-        with:
-          path: .cargo-chronoscope/history.db
-          key: chronoscope-db-${{ github.sha }}
+          cargo-args: '--release'
+          baseline-ref: 'main'
+          # Comment is posted by perf-comment.yml, not in this job — the
+          # in-step path silently fails on forked-PR runs.
+          comment: 'false'
+          upload-artifact: 'true'
