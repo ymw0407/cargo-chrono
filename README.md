@@ -184,7 +184,19 @@ baseline branch records a build and updates a cached history database;
 each pull request records a build and posts (or updates in place) a
 sticky comment with the diff against the baseline.
 
+### Recommended setup (works on PRs from forks)
+
+GitHub forces the `GITHUB_TOKEN` of any `pull_request` workflow run from
+a fork to be read-only, regardless of the workflow's `permissions:`
+block. A composite action cannot work around this from inside the same
+job, so to make the sticky comment land on fork PRs the report is
+uploaded as an artifact and a sibling workflow on `workflow_run` posts
+it from base-repo context.
+
+Drop both of these into `.github/workflows/`:
+
 ```yaml
+# .github/workflows/build-perf.yml
 name: Build performance
 
 on:
@@ -198,18 +210,76 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: write          # required for sticky PR comments
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: ymw0407/cargo-chronoscope@action-v1
         with:
-          version: '0.1.6'          # crate version pulled from crates.io
-          cargo-args: '--release'   # forwarded to `cargo build`
+          version: '0.1.6'
+          cargo-args: '--release'
           baseline-ref: 'main'
-          comment: 'true'
+          comment: 'false'           # let the companion workflow post
+          upload-artifact: 'true'    # hand off the report as an artifact
 ```
+
+```yaml
+# .github/workflows/perf-comment.yml
+name: Build performance comment
+
+on:
+  workflow_run:
+    workflows: ["Build performance"]
+    types: [completed]
+
+jobs:
+  comment:
+    runs-on: ubuntu-latest
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success'
+    permissions:
+      pull-requests: write
+      actions: read
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: perf-report
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+          path: ./perf-artifact
+      # See examples/ci/perf-comment.yml for the validation + posting steps.
+```
+
+The full companion (with PR-number validation and the sticky-comment
+posting logic) lives at
+[`examples/ci/perf-comment.yml`](examples/ci/perf-comment.yml). Both
+files are copy-pasteable as-is.
+
+### Simpler setup (single workflow, same-repo PRs only)
+
+If your repository never receives PRs from forks, you can skip the
+companion workflow and let the action post the comment directly:
+
+```yaml
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write          # required for the in-step comment
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: ymw0407/cargo-chronoscope@action-v1
+        with:
+          version: '0.1.6'
+          comment: 'true'           # action posts the comment itself
+```
+
+This will silently skip the comment step on any forked-PR run.
+
+### Tags
 
 Release tags follow two namespaces:
 
@@ -219,7 +289,7 @@ Release tags follow two namespaces:
 | `action-vN`      | Moving major tag for the GitHub Action — points at the latest backward-compatible release. | `uses: ymw0407/cargo-chronoscope@action-v1` |
 | `action-vN.M.P`  | Immutable point release for the action.              | `uses: ymw0407/cargo-chronoscope@action-v1.0.2` |
 
-Action inputs:
+### Action inputs
 
 | Input              | Default            | Description |
 |--------------------|--------------------|-------------|
@@ -227,10 +297,11 @@ Action inputs:
 | `cargo-args`       | `--release`        | Forwarded verbatim to `cargo build`. |
 | `baseline-ref`     | `main`             | Branch whose cached DB is the baseline. Only pushes to this ref update the cache. |
 | `cache-key-prefix` | `chronoscope-db`   | Prefix for the GitHub Actions cache key. |
-| `comment`          | `true`             | Post or update a sticky PR comment with the diff. |
-| `github-token`     | `${{ github.token }}` | Token used for the comment step. |
+| `comment`          | `true`             | Post or update a sticky PR comment from inside this job. Silently fails on fork PRs — see the recommended setup above. |
+| `upload-artifact`  | `false`            | Upload the report and PR number as an artifact named `perf-report` for the companion `workflow_run` workflow. |
+| `github-token`     | `${{ github.token }}` | Token used for the in-step comment path. |
 
-Action outputs:
+### Action outputs
 
 | Output | Description |
 |---|---|
@@ -241,8 +312,9 @@ Action outputs:
 > directory short-circuits compilation and erases the per-crate timing
 > signal that chronoscope measures.
 
-A copy-pasteable reference workflow lives at
-[`examples/ci/build-perf.yml`](examples/ci/build-perf.yml).
+Copy-pasteable reference workflows live at
+[`examples/ci/build-perf.yml`](examples/ci/build-perf.yml) and
+[`examples/ci/perf-comment.yml`](examples/ci/perf-comment.yml).
 
 ## How it works
 

@@ -14,10 +14,21 @@ branding:
 #   2. Install cargo-chronoscope (from crates.io, with `--locked`).
 #   3. Run `cargo-chronoscope record` against the project under test.
 #   4. Render a Markdown diff (current build vs. previous build) into
-#      $GITHUB_STEP_SUMMARY, and -- on pull_request runs -- as a sticky
-#      PR comment identified by a hidden marker so it updates in place.
+#      $GITHUB_STEP_SUMMARY, and -- on pull_request runs -- either post
+#      it as a sticky comment (`comment: true`) or upload it as an
+#      artifact for a workflow_run-triggered companion to post
+#      (`upload-artifact: true`).
 #   5. Save the updated DB back to the cache, but only on baseline-branch
 #      pushes, so PR runs never overwrite the baseline.
+#
+# Sticky comments and forked PRs:
+# GitHub forces forked-PR runs to use a read-only GITHUB_TOKEN regardless
+# of the workflow's `permissions:` block, so the in-step `comment: true`
+# path silently fails on fork PRs. To get sticky comments on fork PRs,
+# set `comment: false` and `upload-artifact: true`, then pair this action
+# with the workflow at examples/ci/perf-comment.yml in your repository.
+# That companion runs on `workflow_run`, which executes in base-repo
+# context with a write-capable token even for forked-PR upstream runs.
 #
 # The action is intentionally `composite` (not Docker / JS) so it inherits
 # the calling workflow's Rust toolchain and its rust-cache state. The
@@ -51,11 +62,23 @@ inputs:
     default: 'chronoscope-db'
   comment:
     description: >-
-      Post (or update) a sticky PR comment with the diff. `true` or
-      `false`. Forked-PR runs receive a read-only token, so posting may
-      fail silently — the workflow itself continues regardless.
+      Post (or update) a sticky PR comment with the diff from inside this
+      action's job. `true` or `false`. Works for same-repo PRs but
+      silently fails on forked-PR runs because GitHub gives those runs a
+      read-only token. To support fork PRs, set this to `false` and use
+      `upload-artifact: true` together with the perf-comment.yml
+      companion workflow — see examples/ci/.
     required: false
     default: 'true'
+  upload-artifact:
+    description: >-
+      Upload perf-report.md and the PR number as a GitHub Actions
+      artifact (named `perf-report`) so a workflow_run-triggered
+      companion workflow can post the sticky comment from base-repo
+      context. Use this for repos that accept fork PRs. Reference
+      companion at examples/ci/perf-comment.yml.
+    required: false
+    default: 'false'
   github-token:
     description: >-
       Token used to post PR comments. Defaults to ${{ github.token }}.
@@ -176,6 +199,29 @@ runs:
           gh pr comment "$PR" --body-file comment.md
           echo "Created new PR comment."
         fi
+
+    - name: Stage perf artifact for the companion workflow
+      if: inputs.upload-artifact == 'true' && github.event_name == 'pull_request'
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p perf-artifact
+        cp perf-report.md perf-artifact/perf-report.md
+        # The companion workflow (examples/ci/perf-comment.yml) reads
+        # pr-number.txt and validates it as a positive integer before
+        # interpolating it anywhere, so a tampered artifact cannot inject
+        # shell or URL fragments.
+        printf '%s\n' "${{ github.event.pull_request.number }}" \
+          > perf-artifact/pr-number.txt
+
+    - name: Upload perf artifact
+      if: inputs.upload-artifact == 'true' && github.event_name == 'pull_request'
+      uses: actions/upload-artifact@v4
+      with:
+        name: perf-report
+        path: perf-artifact/
+        retention-days: 7
+        if-no-files-found: error
 
     - name: Save chronoscope history
       if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', inputs.baseline-ref)
