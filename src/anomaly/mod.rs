@@ -106,12 +106,19 @@ pub fn classify_in_progress(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::Baseline;
+    use crate::model::{Baseline, CrateId};
 
     fn make_baseline(mean_ms: u64, std_dev_ms: u64) -> Baseline {
         Baseline {
+            crate_id: CrateId {
+                name: "test-crate".to_string(),
+                version: None,
+            },
+            sample_count: 10,
             mean: Duration::from_millis(mean_ms),
             std_dev: Duration::from_millis(std_dev_ms),
+            min: Duration::from_millis(mean_ms.saturating_sub(std_dev_ms * 3)),
+            max: Duration::from_millis(mean_ms + std_dev_ms * 3),
         }
     }
 

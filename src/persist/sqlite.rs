@@ -168,17 +168,24 @@ impl BuildRepository for SqliteRepository {
         };
 
         let mut comp_stmt = conn.prepare(
-            "SELECT crate_name, crate_version, duration_ms \
+            "SELECT crate_name, crate_version, kind, started_at, finished_at, duration_ms \
              FROM crate_compilations WHERE build_id = ?1",
         )?;
 
         let comp_rows = comp_stmt.query_map([id.0], |row| {
             let name: String = row.get(0)?;
             let version: Option<String> = row.get(1)?;
-            let duration_ms: i64 = row.get(2)?;
+            let kind: String = row.get(2)?;
+            let started_at: String = row.get(3)?;
+            let finished_at: String = row.get(4)?;
+            let duration_ms: i64 = row.get(5)?;
 
             Ok(CrateCompilation {
+                build_id: id,
                 crate_id: CrateId { name, version },
+                kind,
+                started_at,
+                finished_at,
                 duration: Duration::from_millis(duration_ms as u64),
             })
         })?;
@@ -200,6 +207,8 @@ impl BuildRepository for SqliteRepository {
         let mut stmt = conn.prepare(
             "SELECT COUNT(*), \
                     AVG(duration_ms), \
+                    MIN(duration_ms), \
+                    MAX(duration_ms), \
                     AVG(duration_ms * duration_ms) \
              FROM crate_compilations WHERE crate_name = ?1",
         )?;
@@ -211,15 +220,24 @@ impl BuildRepository for SqliteRepository {
             }
 
             let mean_ms: f64 = row.get(1)?;
-            let mean_square_ms: f64 = row.get(2)?;
+            let min_ms: i64 = row.get(2)?;
+            let max_ms: i64 = row.get(3)?;
+            let mean_square_ms: f64 = row.get(4)?;
 
             // Population std dev: sqrt(E[X^2] - (E[X])^2). Clamp negatives from float drift.
             let variance = (mean_square_ms - mean_ms * mean_ms).max(0.0);
             let std_dev_ms = variance.sqrt();
 
             Ok(Some(Baseline {
+                crate_id: CrateId {
+                    name: crate_name.to_string(),
+                    version: None,
+                },
+                sample_count: count as u32,
                 mean: Duration::from_millis(mean_ms as u64),
                 std_dev: Duration::from_millis(std_dev_ms as u64),
+                min: Duration::from_millis(min_ms as u64),
+                max: Duration::from_millis(max_ms as u64),
             }))
         })?;
 
@@ -416,6 +434,7 @@ mod tests {
         );
         assert_eq!(details.compilations.len(), 1);
         assert_eq!(details.compilations[0].crate_id.name, "demo");
+        assert_eq!(details.compilations[0].kind, "lib");
         assert_eq!(
             details.compilations[0].duration,
             Duration::from_millis(5000)
@@ -527,7 +546,10 @@ mod tests {
             .unwrap()
             .expect("baseline should exist with 5 samples");
 
+        assert_eq!(baseline.sample_count, 5);
         assert_eq!(baseline.mean, Duration::from_millis(300));
+        assert_eq!(baseline.min, Duration::from_millis(100));
+        assert_eq!(baseline.max, Duration::from_millis(500));
 
         // std_dev for {100,200,300,400,500} is ~141ms (population) or ~158ms (sample).
         // Accept either convention — just ensure it's in a sensible range.

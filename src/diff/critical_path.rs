@@ -64,15 +64,19 @@ mod tests {
     //! Contract tests for `compute_critical_path`.
 
     use super::*;
-    use crate::model::CrateId;
+    use crate::model::{BuildId, CrateId};
     use std::time::Duration;
 
     fn compilation(name: &str, ms: u64) -> CrateCompilation {
         CrateCompilation {
+            build_id: BuildId(1),
             crate_id: CrateId {
                 name: name.to_string(),
                 version: None,
             },
+            kind: "lib".to_string(),
+            started_at: "2025-01-01T00:00:00Z".to_string(),
+            finished_at: "2025-01-01T00:00:01Z".to_string(),
             duration: Duration::from_millis(ms),
         }
     }
