@@ -81,8 +81,9 @@ inputs:
     default: 'false'
   github-token:
     description: >-
-      Token used to post PR comments. Defaults to ${{ github.token }}.
-      Only used when `comment` is `true` and the event is a pull_request.
+      Token used to post PR comments. Defaults to the workflow's
+      automatic GITHUB_TOKEN. Only used when `comment` is `true` and
+      the event is a pull_request.
     required: false
     default: ${{ github.token }}
 
