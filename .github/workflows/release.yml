@@ -95,10 +95,21 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
+          # macOS Intel: cross-compile from Apple Silicon (`macos-latest`)
+          # because macOS-13 Intel runners are no longer reliably allocated
+          # by GitHub Actions. The Apple Silicon SDK ships both
+          # architectures, so `cargo build --target x86_64-apple-darwin`
+          # succeeds on the arm64 runner once `rustup target add` has run.
           - target: x86_64-apple-darwin
-            os: macos-13
+            os: macos-latest
           - target: aarch64-apple-darwin
-            os: macos-14
+            os: macos-latest
+          # Windows MSVC build — the only path that lets users on Windows
+          # install via `cargo binstall cargo-chronoscope` (and thereby
+          # avoid the Smart App Control / WDAC blocks on cargo's temp
+          # build-script .exe files that source-builds hit).
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v6
@@ -109,10 +120,11 @@ jobs:
 
       - name: Build & attach archive to GitHub Release
         # Builds in `release` profile, packages the binary as
-        # `cargo-chronoscope-${TARGET}.tar.gz`, and uploads it to the
+        # `cargo-chronoscope-${TARGET}.{tar.gz,zip}`, and uploads it to the
         # GitHub Release that this tag created. cargo-binstall consumers
         # then resolve the archive via the [package.metadata.binstall]
-        # template in Cargo.toml.
+        # template in Cargo.toml. The action picks `.zip` for Windows
+        # targets and `.tar.gz` for Unix targets automatically.
         uses: taiki-e/upload-rust-binary-action@v1
         with:
           bin: cargo-chronoscope
