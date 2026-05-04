@@ -3,7 +3,7 @@
 **/*.rs.bk
 
 # cargo-chrono local data
-.cargo-chrono/
+.cargo-chronoscope/
 
 # IDE
 .idea/
