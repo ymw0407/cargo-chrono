@@ -17,12 +17,6 @@
 //! - `SupervisorHandle::cancel()` kills the child process.
 //! - `SupervisorHandle::wait()` waits for the child to exit and returns its `ExitStatus`.
 
-// `SupervisorHandle::cancel()`/`wait()` are intentionally exposed but not yet
-// consumed by the run pipeline — `cmd_record` and `cmd_watch` discard the
-// handle today, so Ctrl-C does not kill the cargo child. Tracked in #60; this
-// is the *only* dead-code allow in the crate. Once #60 lands, remove it.
-#![allow(dead_code)]
-
 use std::path::PathBuf;
 use std::process::{ExitStatus, Stdio};
 use std::sync::Mutex;
@@ -192,6 +186,10 @@ impl SupervisorHandle {
     ///
     /// Returns the exit status of the cargo process. Consumes `self`, so it
     /// can only be called once.
+    ///
+    /// Currently only used in tests; production callers rely on `cancel()` and
+    /// let `kill_on_drop` clean up the child.
+    #[allow(dead_code)]
     pub async fn wait(self) -> anyhow::Result<ExitStatus> {
         // Take the child out of the mutex. The lock guard must be dropped
         // immediately so a concurrent `cancel()` call can still acquire the
@@ -300,6 +298,66 @@ mod tests {
         drop(rx);
         // Wait briefly for the child to exit. No panics should occur.
         let _ = timeout(Duration::from_secs(2), handle.wait()).await;
+    }
+
+    /// Proves the bug in issue #60: when `handle` is discarded (mirrors
+    /// the pre-fix `let (line_rx, _handle) = spawn_build(...)` in main.rs),
+    /// firing the outer cancel token does NOT kill the child.
+    ///
+    /// The process should still be alive 300 ms after the cancel fires.
+    #[tokio::test]
+    async fn issue_60_outer_cancel_without_wiring_does_not_kill_child() {
+        let (mut rx, _handle) = spawn_sh("sleep 60").await.unwrap();
+        // _handle is discarded — exactly what cmd_record currently does.
+
+        let outer_cancel = CancellationToken::new();
+        outer_cancel.cancel(); // Ctrl-C fires
+
+        // Process is still alive: channel stays open for 300 ms.
+        let result = timeout(Duration::from_millis(300), rx.recv()).await;
+        assert!(
+            result.is_err(),
+            "expected process to still be running (handle.cancel not called), \
+             but channel closed unexpectedly"
+        );
+        // _handle drops here → kill_on_drop cleans up the child.
+    }
+
+    /// Issue #60 regression: when the outer `CancellationToken` fires (Ctrl-C
+    /// in `main`), the child process must be killed promptly.
+    ///
+    /// Before the fix, `cmd_record`/`cmd_watch` discarded the handle with
+    /// `let (line_rx, _handle) = spawn_build(...)`, so the outer cancel never
+    /// reached the supervisor and the cargo child kept running. This test
+    /// proves the *desired* post-fix behaviour: wiring the outer cancel token
+    /// to `handle.cancel()` kills the process within 1 s.
+    #[tokio::test]
+    async fn wired_cancel_kills_child_on_outer_cancel() {
+        let (mut rx, handle) = spawn_sh("sleep 60").await.unwrap();
+
+        let outer_cancel = CancellationToken::new();
+
+        // Simulate what cmd_record must do after the fix.
+        {
+            let cancel_clone = outer_cancel.clone();
+            tokio::spawn(async move {
+                cancel_clone.cancelled().await;
+                handle.cancel();
+            });
+        }
+
+        // Fire the outer cancel (user pressed Ctrl-C).
+        outer_cancel.cancel();
+
+        // The channel must close within 1 s (process was killed).
+        let result = timeout(Duration::from_secs(1), rx.recv())
+            .await
+            .expect("channel did not close within 1 s — process was NOT killed");
+        assert!(
+            result.is_none(),
+            "expected channel close (None) after kill, got: {:?}",
+            result
+        );
     }
 
     /// End-to-end check that real cargo output flows through the supervisor.

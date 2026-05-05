@@ -82,7 +82,14 @@ async fn cmd_record(
 
     let repo = Arc::new(persist::SqliteRepository::open(db_path).await?);
 
-    let (line_rx, _handle) = supervisor::spawn_build(cargo_args.clone(), workspace_dir).await?;
+    let (line_rx, handle) = supervisor::spawn_build(cargo_args.clone(), workspace_dir).await?;
+
+    // Kill the cargo child when the user cancels (Ctrl-C).
+    let cancel_for_supervisor = cancel.clone();
+    tokio::spawn(async move {
+        cancel_for_supervisor.cancelled().await;
+        handle.cancel();
+    });
 
     let config = parser::ParserConfig {
         commit_hash,
@@ -107,7 +114,14 @@ async fn cmd_watch(
 
     let repo = Arc::new(persist::SqliteRepository::open(db_path).await?);
 
-    let (line_rx, _handle) = supervisor::spawn_build(cargo_args.clone(), workspace_dir).await?;
+    let (line_rx, handle) = supervisor::spawn_build(cargo_args.clone(), workspace_dir).await?;
+
+    // Kill the cargo child when the user cancels (Ctrl-C or TUI `q`).
+    let cancel_for_supervisor = cancel.clone();
+    tokio::spawn(async move {
+        cancel_for_supervisor.cancelled().await;
+        handle.cancel();
+    });
 
     let config = parser::ParserConfig {
         commit_hash,
