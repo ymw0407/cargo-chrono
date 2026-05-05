@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-05-05
+
+### Changed
+- Release tagging consolidated: `vX.Y.Z` is now the single canonical tag for both the crate and the GitHub Action. Each release commit ships Cargo.toml + action.yml + examples in lockstep, so the `version` input default in `action.yml` always matches the crate version under the same `vX.Y.Z` tag. This makes the GitHub Marketplace's auto-suggested `uses: ymw0407/cargo-chronoscope@v0.1.9` reference do the right thing — previously it pointed at a commit where `action.yml` defaulted to an older crate version, silently installing a stale binary.
+- `action-v1` (moving) and `action-v1.0.x` (immutable) tags are kept working for existing users but marked legacy in the README. New workflows should pin to `@vX.Y.Z`. The `action-v1.0.x` immutable namespace is frozen at `action-v1.0.4` (= 0.1.8 era); future immutables are just the crate `vX.Y.Z` tag.
+
 ## [0.1.8] - 2026-05-05
 
 ### Fixed
