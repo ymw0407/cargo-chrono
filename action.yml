@@ -38,11 +38,11 @@ inputs:
   version:
     description: >-
       cargo-chronoscope version to install. Pinning a concrete version
-      (e.g. `0.1.6`) gives reproducible runs; `latest` always pulls the
+      (e.g. `0.1.8`) gives reproducible runs; `latest` always pulls the
       newest published crate. Defaults to the current recommended action
       version.
     required: false
-    default: '0.1.6'
+    default: '0.1.8'
   cargo-args:
     description: >-
       Arguments forwarded verbatim to `cargo build` via

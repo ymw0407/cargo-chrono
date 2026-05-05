@@ -218,7 +218,7 @@ jobs:
 
       - uses: ymw0407/cargo-chronoscope@action-v1
         with:
-          version: '0.1.6'
+          version: '0.1.8'
           cargo-args: '--release'
           baseline-ref: 'main'
           comment: 'false'           # let the companion workflow post
@@ -275,7 +275,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: ymw0407/cargo-chronoscope@action-v1
         with:
-          version: '0.1.6'
+          version: '0.1.8'
           comment: 'true'           # action posts the comment itself
 ```
 
@@ -287,15 +287,15 @@ Release tags follow two namespaces:
 
 | Tag | Purpose | Example pin |
 |---|---|---|
-| `vX.Y.Z`         | Binary release on crates.io. Used by `cargo install`. | `cargo install cargo-chronoscope --version 0.1.6` |
+| `vX.Y.Z`         | Binary release on crates.io. Used by `cargo install`. | `cargo install cargo-chronoscope --version 0.1.8` |
 | `action-vN`      | Moving major tag for the GitHub Action — points at the latest backward-compatible release. | `uses: ymw0407/cargo-chronoscope@action-v1` |
-| `action-vN.M.P`  | Immutable point release for the action.              | `uses: ymw0407/cargo-chronoscope@action-v1.0.2` |
+| `action-vN.M.P`  | Immutable point release for the action.              | `uses: ymw0407/cargo-chronoscope@action-v1.0.4` |
 
 ### Action inputs
 
 | Input              | Default            | Description |
 |--------------------|--------------------|-------------|
-| `version`          | `0.1.6`            | crate version installed via `cargo install`. Use a concrete version for reproducibility, or `latest`. |
+| `version`          | `0.1.8`            | crate version installed via `cargo install`. Use a concrete version for reproducibility, or `latest`. |
 | `cargo-args`       | `--release`        | Forwarded verbatim to `cargo build`. |
 | `baseline-ref`     | `main`             | Branch whose cached DB is the baseline. Only pushes to this ref update the cache. |
 | `cache-key-prefix` | `chronoscope-db`   | Prefix for the GitHub Actions cache key. |

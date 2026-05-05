@@ -47,7 +47,7 @@ jobs:
         with:
           # cargo-chronoscope binary version pulled from crates.io. Pin a
           # concrete version for reproducibility, or use `latest`.
-          version: '0.1.6'
+          version: '0.1.8'
           # Forwarded to `cargo build`. Default is --release; pass an empty
           # string for a debug build.
           cargo-args: '--release'
