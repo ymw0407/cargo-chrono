@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 
 use crate::model::{Baseline, Build, BuildDetails, BuildEvent, BuildId, BuildProfile, CrateId};
 
@@ -100,6 +100,7 @@ pub trait BuildRepository: Send + Sync {
 /// - Records each `CompilationFinished` event.
 /// - Finalizes the build on `BuildFinished`.
 /// - Returns the `BuildId` of the recorded build.
+/// - Sends `BuildId` on `started_tx` as soon as the build row is created.
 ///
 /// # Errors
 ///
@@ -108,6 +109,7 @@ pub trait BuildRepository: Send + Sync {
 pub async fn run_persister(
     repo: Arc<dyn BuildRepository>,
     mut rx: mpsc::Receiver<BuildEvent>,
+    started_tx: Option<oneshot::Sender<BuildId>>,
 ) -> anyhow::Result<BuildId> {
     // The first event must be BuildStarted; everything else flows from the
     // BuildId issued here.
@@ -135,6 +137,10 @@ pub async fn run_persister(
             ));
         }
     };
+
+    if let Some(tx) = started_tx {
+        let _ = tx.send(build_id);
+    }
 
     // Drain the rest of the stream. CompilationStarted is informational (only
     // the TUI cares) and intentionally not persisted.
@@ -234,7 +240,7 @@ mod tests {
         tx.send(build_finished(true, 1500)).await.unwrap();
         drop(tx);
 
-        let id = run_persister(repo.clone(), rx).await.unwrap();
+        let id = run_persister(repo.clone(), rx, None).await.unwrap();
         let details = repo.fetch_build(id).await.unwrap().expect("build recorded");
         assert_eq!(details.compilations.len(), 2);
         assert_eq!(details.build.success, Some(true));
@@ -263,7 +269,7 @@ mod tests {
         tx.send(build_finished(true, 100)).await.unwrap();
         drop(tx);
 
-        let id = run_persister(repo.clone(), rx).await.unwrap();
+        let id = run_persister(repo.clone(), rx, None).await.unwrap();
         let details = repo.fetch_build(id).await.unwrap().unwrap();
         assert!(details.compilations.is_empty());
     }
@@ -276,7 +282,7 @@ mod tests {
         tx.send(build_finished(true, 0)).await.unwrap();
         drop(tx);
 
-        let result = run_persister(repo, rx).await;
+        let result = run_persister(repo, rx, None).await;
         assert!(
             result.is_err(),
             "expected error when first event is not BuildStarted, got {:?}",
@@ -293,8 +299,29 @@ mod tests {
         tx.send(build_finished(false, 200)).await.unwrap();
         drop(tx);
 
-        let id = run_persister(repo.clone(), rx).await.unwrap();
+        let id = run_persister(repo.clone(), rx, None).await.unwrap();
         let details = repo.fetch_build(id).await.unwrap().unwrap();
         assert_eq!(details.build.success, Some(false));
+    }
+
+    #[tokio::test]
+    async fn sends_build_id_before_build_finishes() {
+        let (_d, repo) = setup().await;
+        let (tx, rx) = mpsc::channel(16);
+        let (started_tx, started_rx) = oneshot::channel();
+
+        tx.send(build_started()).await.unwrap();
+
+        let persister = tokio::spawn(run_persister(repo.clone(), rx, Some(started_tx)));
+        let id = started_rx.await.expect("build start notification");
+
+        let details = repo.fetch_build(id).await.unwrap().expect("build started");
+        assert_eq!(details.build.success, None);
+
+        tx.send(build_finished(true, 100)).await.unwrap();
+        drop(tx);
+
+        let returned_id = persister.await.unwrap().unwrap();
+        assert_eq!(returned_id, id);
     }
 }
