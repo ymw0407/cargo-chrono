@@ -216,7 +216,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
 
-      - uses: ymw0407/cargo-chronoscope@action-v1
+      - uses: ymw0407/cargo-chronoscope@v0.1.9
         with:
           version: '0.1.9'
           cargo-args: '--release'
@@ -273,7 +273,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - uses: ymw0407/cargo-chronoscope@action-v1
+      - uses: ymw0407/cargo-chronoscope@v0.1.9
         with:
           version: '0.1.9'
           comment: 'true'           # action posts the comment itself
