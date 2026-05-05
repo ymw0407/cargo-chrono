@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-05-05
+
+### Fixed
+- `cargo-chronoscope watch` and `record` now actually kill the cargo child process when the user presses `Ctrl-C` (or `q` in the TUI). Previously the `SupervisorHandle` returned by `spawn_build` was discarded, so the outer `CancellationToken` never reached the supervisor and cargo kept compiling silently in the background after the dashboard closed. ([#77](https://github.com/ymw0407/cargo-chronoscope/pull/77), closes [#60](https://github.com/ymw0407/cargo-chronoscope/issues/60))
+- `fetch_baseline` now excludes compilations from failed and unfinalized builds. Pre-fix, the anomaly classifier's mean ± 2σ was contaminated by samples from `success = 0` and never-finalized builds, causing baseline drift and misclassified `slower` / `faster` verdicts on subsequent runs. ([#79](https://github.com/ymw0407/cargo-chronoscope/pull/79))
+
+### Changed
+- TUI: refactored `wait_for_exit_key` so the cancel-handling loop is testable via dependency injection on the key-reading callback, with a regression test that catches re-introductions of the pre-#34 bug. ([#55](https://github.com/ymw0407/cargo-chronoscope/pull/55), closes [#37](https://github.com/ymw0407/cargo-chronoscope/issues/37))
+
 ## [0.1.7] - 2026-05-05
 
 ### Added
