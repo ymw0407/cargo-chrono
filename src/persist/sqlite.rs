@@ -206,11 +206,14 @@ impl BuildRepository for SqliteRepository {
 
         let mut stmt = conn.prepare(
             "SELECT COUNT(*), \
-                    AVG(duration_ms), \
-                    MIN(duration_ms), \
-                    MAX(duration_ms), \
-                    AVG(duration_ms * duration_ms) \
-             FROM crate_compilations WHERE crate_name = ?1",
+                    AVG(cc.duration_ms), \
+                    MIN(cc.duration_ms), \
+                    MAX(cc.duration_ms), \
+                    AVG(cc.duration_ms * cc.duration_ms) \
+             FROM crate_compilations cc \
+             JOIN builds b ON cc.build_id = b.id \
+             WHERE cc.crate_name = ?1 \
+               AND b.success = 1",
         )?;
 
         let baseline = stmt.query_row([crate_name], |row| {
@@ -511,6 +514,69 @@ mod tests {
         repo.delete_build(BuildId(9999)).await.unwrap();
     }
 
+    /// Regression test for the bug where `fetch_baseline` had no JOIN with
+    /// `builds`, causing compilations from failed builds to pollute the
+    /// anomaly-detection baseline.
+    #[tokio::test]
+    async fn fetch_baseline_excludes_compilations_from_failed_builds() {
+        let (_d, repo) = fresh_repo().await;
+        let crate_id = lib_crate("foo");
+
+        // Successful build: foo = 100 ms.
+        let ok_id = repo
+            .begin_build("2025-01-01T00:00:00Z", None, "[]", &BuildProfile::Dev)
+            .await
+            .unwrap();
+        repo.record_compilation(
+            ok_id,
+            &crate_id,
+            "lib",
+            "2025-01-01T00:00:00Z",
+            "2025-01-01T00:00:01Z",
+            Duration::from_millis(100),
+        )
+        .await
+        .unwrap();
+        repo.finalize_build(ok_id, "2025-01-01T00:00:01Z", true, Duration::from_secs(1))
+            .await
+            .unwrap();
+
+        // Failed build: foo compiled successfully before another crate errored,
+        // so it has a crate_compilation row — but the build itself failed.
+        let fail_id = repo
+            .begin_build("2025-01-01T00:01:00Z", None, "[]", &BuildProfile::Dev)
+            .await
+            .unwrap();
+        repo.record_compilation(
+            fail_id,
+            &crate_id,
+            "lib",
+            "2025-01-01T00:01:00Z",
+            "2025-01-01T00:01:01Z",
+            Duration::from_millis(9999), // wildly different — would skew the mean
+        )
+        .await
+        .unwrap();
+        repo.finalize_build(
+            fail_id,
+            "2025-01-01T00:01:01Z",
+            false,
+            Duration::from_secs(1),
+        )
+        .await
+        .unwrap();
+
+        let baseline = repo
+            .fetch_baseline("foo")
+            .await
+            .unwrap()
+            .expect("baseline should exist");
+
+        // Only the successful build's sample should be counted.
+        assert_eq!(baseline.sample_count, 1);
+        assert_eq!(baseline.mean, Duration::from_millis(100));
+    }
+
     #[tokio::test]
     async fn fetch_baseline_none_when_no_data() {
         let (_d, repo) = fresh_repo().await;
@@ -539,6 +605,9 @@ mod tests {
             .await
             .unwrap();
         }
+        repo.finalize_build(id, "2025-01-01T00:00:01Z", true, Duration::from_secs(1))
+            .await
+            .unwrap();
 
         let baseline = repo
             .fetch_baseline("foo")
