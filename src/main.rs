@@ -17,6 +17,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use clap::Parser;
+use tokio::sync::oneshot;
+use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use crate::cli::{Cli, Command};
@@ -98,7 +100,14 @@ async fn cmd_record(
     };
     let event_rx = parser::run_parser(line_rx, config).await?;
 
-    let build_id = persist::run_persister(repo.clone(), event_rx).await?;
+    let (started_tx, started_rx) = oneshot::channel();
+    let mut persister = tokio::spawn(persist::run_persister(
+        repo.clone(),
+        event_rx,
+        Some(started_tx),
+    ));
+    announce_build_started(started_rx, &mut persister).await?;
+    let build_id = persister.await??;
     finalize_or_discard(repo, build_id, &cancel).await
 }
 
@@ -137,16 +146,41 @@ async fn cmd_watch(
 
     let repo_clone = repo.clone();
     let cancel_clone = cancel.clone();
+    let (started_tx, started_rx) = oneshot::channel();
 
-    // Run all tasks concurrently.
-    let (broker_result, persister_result, tui_result) = tokio::try_join!(
-        event_broker.publish_loop(event_rx, cancel.clone()),
-        persist::run_persister(repo_clone, persister_rx),
-        tui::run_tui(tui_rx, repo.clone(), cancel_clone),
-    )?;
+    let broker = tokio::spawn(event_broker.publish_loop(event_rx, cancel.clone()));
+    let mut persister = tokio::spawn(persist::run_persister(
+        repo_clone,
+        persister_rx,
+        Some(started_tx),
+    ));
 
-    let _ = (broker_result, tui_result);
-    finalize_or_discard(repo, persister_result, &cancel).await
+    announce_build_started(started_rx, &mut persister).await?;
+
+    let tui_result = tui::run_tui(tui_rx, repo.clone(), cancel_clone).await;
+    let broker_result = broker.await?;
+    let persister_result = persister.await?;
+
+    broker_result?;
+    tui_result?;
+    finalize_or_discard(repo, persister_result?, &cancel).await
+}
+
+async fn announce_build_started(
+    started_rx: oneshot::Receiver<BuildId>,
+    persister: &mut JoinHandle<anyhow::Result<BuildId>>,
+) -> anyhow::Result<()> {
+    tokio::select! {
+        id = started_rx => {
+            let id = id?;
+            println!("Recording build {}...", id);
+            Ok(())
+        }
+        result = persister => {
+            result??;
+            anyhow::bail!("build finished before start notification was delivered")
+        }
+    }
 }
 
 /// Either announce the recorded build, or — if the user cancelled — delete the
