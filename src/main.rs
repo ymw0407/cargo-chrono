@@ -13,7 +13,7 @@ mod persist;
 mod supervisor;
 mod tui;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use clap::Parser;
@@ -77,6 +77,8 @@ async fn cmd_record(
     db_path: &std::path::Path,
     cancel: CancellationToken,
 ) -> anyhow::Result<()> {
+    ensure_cargo_project(&workspace_dir)?;
+
     let commit_hash = read_git_head();
     let profile = infer_profile(&cargo_args);
 
@@ -109,6 +111,8 @@ async fn cmd_watch(
     db_path: &std::path::Path,
     cancel: CancellationToken,
 ) -> anyhow::Result<()> {
+    ensure_cargo_project(&workspace_dir)?;
+
     let commit_hash = read_git_head();
     let profile = infer_profile(&cargo_args);
 
@@ -147,6 +151,28 @@ async fn cmd_watch(
 
     let _ = (broker_result, tui_result);
     finalize_or_discard(repo, persister_result, &cancel).await
+}
+
+/// Ensure the command is running inside a Cargo project before spawning cargo.
+fn ensure_cargo_project(workspace_dir: &Path) -> anyhow::Result<()> {
+    if find_cargo_manifest(workspace_dir).is_some() {
+        return Ok(());
+    }
+
+    anyhow::bail!(
+        "no Cargo.toml in {} or any parent directory.\n\n\
+         cargo-chronoscope must be run from inside a Rust project (the same place `cargo build` would work). Try:\n\
+             cd /path/to/your/rust/project\n\
+             cargo-chronoscope record",
+        workspace_dir.display()
+    );
+}
+
+fn find_cargo_manifest(workspace_dir: &Path) -> Option<PathBuf> {
+    workspace_dir
+        .ancestors()
+        .map(|dir| dir.join("Cargo.toml"))
+        .find(|path| path.is_file())
 }
 
 /// Either announce the recorded build, or — if the user cancelled — delete the
